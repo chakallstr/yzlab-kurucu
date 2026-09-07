@@ -1,0 +1,45 @@
+name: Windows kurucu
+
+on:
+  push:
+    branches: [main]
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  pull_request:
+    paths: ['windows/**']
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  derle-ve-sina:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Derle (tek dosya, self-contained)
+        run: dotnet publish windows/src/YzlabKurucu.csproj -c Release -o out
+
+      - name: Kendi kendini sina
+        # Windows makinemiz yok; kurulum mantiginin TEK dogrulamasi bu.
+        run: ./out/YzlabKurucu.exe --selftest
+
+      - name: Exe bilgisi
+        run: |
+          Get-Item out/YzlabKurucu.exe | Select-Object Name,Length,LastWriteTime
+          (Get-Item out/YzlabKurucu.exe).VersionInfo | Format-List ProductName,FileVersion
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YzlabKurucu-exe
+          path: out/YzlabKurucu.exe
+          if-no-files-found: error
+
+      - name: Release'e ekle
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/YzlabKurucu.exe

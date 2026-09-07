@@ -1,0 +1,6 @@
+macos/.build/
+macos/build/
+windows/out/
+windows/src/bin/
+windows/src/obj/
+.DS_Store
