@@ -41,7 +41,16 @@ struct Manifest: Codable {
     let codex: Codex
     let node: Node
 
-    static let manifestUrl = URL(string: "https://yapayzekalab.org/kurulum/codex.json")!
+    static var manifestUrl: URL {
+        #if DEBUG
+        // Yalniz DEBUG derlemede: yerel test sunucusuna yonlendirme.
+        // Dagitilan RELEASE ikilisinde bu dal DERLENMEZ — musterinin kurucusu
+        // adresi asla disaridan degistirilemez.
+        if let s = ProcessInfo.processInfo.environment["YZLAB_MANIFEST_URL"],
+           let u = URL(string: s) { return u }
+        #endif
+        return URL(string: "https://yapayzekalab.org/kurulum/codex.json")!
+    }
 
     /// Once sunucudan cek; ulasilamazsa gomulu surume dus.
     /// Kurulumun internet kesintisinde de calismasi icin.
