@@ -95,9 +95,13 @@ Clang bunları gerçek başlık sanıp modülü kırıyor:
 1. ~~`codex-catalog.json`~~ ✅ bitti (87 KB, 5 model, doğrulandı)
 2. ~~macOS kurucu~~ ✅ BİTTİ — universal, imzalı, NOTARIZE EDİLDİ, `spctl: accepted` (app+dmg)
 3. ~~macOS notarize~~ ✅ profil `yzlab-notary` Keychain'de; `NOTARIZE=1 ./scripts/build.sh`
-4. Windows kurucu (C# + CI)  ← SIRADAKİ
-5. `/kurulum` sayfası: OS algıla, 2 buton, SmartScreen anlatımı
-6. (ops) `/v1/balance`'a `tier` ekle → BALLS için otomatik 750k
+4. ~~Windows kurucu~~ ✅ CI'da derlendi (63 MB tek exe), selftest 16/16
+5. `/kurulum` sayfası: OS algıla, 2 buton, SmartScreen anlatımı  ← SIRADAKİ
+6. Manifest + katalog canlıya (onay bekliyor) — bunlar 404 olduğu sürece
+   kurucular gömülü yedekle çalışır
+7. GitHub Release oluştur → manifest'teki indirme adresleri ancak o zaman çalışır
+8. Gerçek anahtarla uçtan uca kurulum testi (sahibin izni bekleniyor)
+9. (ops) `/v1/balance`'a `tier` ekle → BALLS için otomatik 750k
 
 ## Test durumu
 - Windows makinesi YOK. Mac mini'de yerel VM de YOK: **disk 96% dolu, 7,5 GB boş**
@@ -110,3 +114,12 @@ Clang bunları gerçek başlık sanıp modülü kırıyor:
 Manifest `public/` altında STATİK; rota eklemiyoruz, `.next/types` bayat-rota tuzağı
 (`yzlab-api-sekmesi-ve-rota-tuzaklari` TUZAK 2) bu dosya için geçerli DEĞİL.
 Yine de canlıya çıkmak AÇIK ONAY ister.
+
+## ⚠️ CI tuzağı — WinExe çıkış kodu okunmaz
+`.exe` WinForms (WinExe alt sistemi) olduğu için PowerShell onu **beklemez** ve
+`$LASTEXITCODE`'u okumaz. İlk koşuda selftest 1 testi kaybettiği halde iş YEŞİL göründü.
+Doğrusu: `Start-Process -NoNewWindow -Wait -PassThru` + `ExitCode`'u elle kontrol et.
+Doğrulama: log'da `selftest cikis kodu: N` satırı görünmüyorsa kapı çalışmıyordur.
+
+## Depo
+https://github.com/chakallstr/yzlab-kurucu (public) · CI: `.github/workflows/windows.yml`
