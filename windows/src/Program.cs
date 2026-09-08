@@ -48,6 +48,8 @@ internal static class SelfTest
                                   : "  bilgi canli manifest YOK — gomuluye dusuldu");
         var kaynak = canliMi ? canliM : gomulu;
 
+        // Sunucu manifesti servis ediyorsa katalogu da ETMEK ZORUNDA -> sert hata.
+        // Sunucuya hic ulasilamiyorsa (gomuluye dusuldu) bu bir CI arizasi degil, bilgi.
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
@@ -56,7 +58,11 @@ internal static class SelfTest
             var adet = doc.RootElement.GetProperty("models").GetArrayLength();
             Kontrol(adet > 0, $"model katalogu indi ve cozuldu ({adet} model)");
         }
-        catch (Exception e) { Kontrol(false, "model katalogu indi: " + e.Message); }
+        catch (Exception e)
+        {
+            if (canliMi) Kontrol(false, "model katalogu indi: " + e.Message);
+            else Console.WriteLine("  bilgi model katalogu atlandi (sunucu erisilemez): " + e.Message);
+        }
 
         // 3) Izole bir CODEX_HOME kurup gercek yazma yolunu calistir.
         var gecici = Path.Combine(Path.GetTempPath(), "yzlab-selftest-" + Guid.NewGuid().ToString("N"));

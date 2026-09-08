@@ -25,7 +25,15 @@ jobs:
 
       - name: Kendi kendini sina
         # Windows makinemiz yok; kurulum mantiginin TEK dogrulamasi bu.
-        run: ./out/YzlabKurucu.exe --selftest
+        # ⚠️ WinExe (GUI alt sistemi) oldugu icin PowerShell onu BEKLEMEZ ve
+        # cikis kodunu okumaz -> test kalsa bile is yesil gorunur.
+        # Start-Process -Wait -PassThru ile beklet ve kodu ELLE kontrol et.
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--selftest' `
+                             -NoNewWindow -Wait -PassThru
+          Write-Host "selftest cikis kodu: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "kendi kendini sinama BASARISIZ" }
 
       - name: Exe bilgisi
         run: |
