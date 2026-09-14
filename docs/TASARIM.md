@@ -102,6 +102,18 @@ Kanıtlanan: anahtar + katalog + şablon + sağlayıcı. Kanıtlanmayan: gerçek
 seçimi — onu selftest'in `CODEX_HOME dikkate aliniyor` kontrolü ve CI'daki bağımsız
 `codex exec` (gerçek CODEX_HOME ile) kapatıyor.
 
+### ⚠️ Codex'in kendisi config.toml'a `[projects]` yazar (bizim değil)
+Profil `danger-full-access` olduğu için müşteri `codex -p yzlab` ile bir dizinde çalışınca **Codex** o dizini
+`config.toml`'a `[projects."<dizin>"] trust_level = "trusted"` olarak ekler. Bu kurucunun değil Codex'in
+davranışı (kurucunun doğrulaması izole dizinde koşar, config.toml'a dokunmaz). CI'daki bağımsız `codex exec`
+gerçek CODEX_HOME'da koştuğu için bu satırı ekler; betik yalnız bu farkı kabul eder, başka fark = kurucu dokundu.
+
+### ⚠️ "401" düz metin araması YANLIŞ POZİTİF
+Codex/Claude çıktısında `401` alt dizesi aramak, geçici dizin UUID'sinde (`workdir: …-401…`), token sayısında
+(`8.401`) ya da sürede (`3401 ms`) da eşleşiyordu → ~%1 koşuda kurulum "anahtar geçersiz" diye boşuna
+reddediliyordu (09-15'te yakalandı). Artık `yetkiReddiMi`/`YetkiReddiMi`: `Unauthorized`, `authentication_error`,
+`Invalid API key`, `geçersiz` ya da `HTTP/status/code 401` deseni. Selftest'te 5 kontrol.
+
 ### ⚠️ stdin KAPALI olmalı
 `codex exec` stdin bir boru/terminal ise "Reading additional input from stdin..." deyip EOF
 bekler ve **asılı kalır** (bu Mac'te 3 dk bekledi). Mac: `Process.standardInput = nullDevice`,
@@ -117,7 +129,7 @@ sahte HOME ile test yapılmaz, CODEX_HOME açıkça verilir.
 ## Komut satırı modları (2026-09-14, iki platform)
 | mod | ne |
 |---|---|
-| `--selftest` | 38 (mac) / 39 (win) invaryant: gömülü manifest, CODEX_HOME/CLAUDE_CONFIG_DIR, dokunmama, settings.json birleştirme+yedek, geri al |
+| `--selftest` | 43 (mac) / 44 (win) invaryant: gömülü manifest, CODEX_HOME/CLAUDE_CONFIG_DIR, dokunmama, settings.json birleştirme+yedek, geri al |
 | `--kur [--anahtar K] [--model id] [--kisayol 0/1] [--claude 0/1]` | başsız kurulum; anahtar `YZLAB_ANAHTAR` env'den de okunur (loglara düşmesin) |
 | `--geri-al` | Codex + Claude Code kurulumunu siler / geri koyar |
 Çıkış kodu: 0 başarı · 1 hata · 2 kullanım. Mac: `main.swift` giriş, pencere modu `YzlabKurucuApp.main()`.
