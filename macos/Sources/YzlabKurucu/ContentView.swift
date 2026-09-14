@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var anahtar = ""
     @State private var model: Manifest.Model
     @State private var kisayol = true
+    @State private var claude = true
     @State private var durum: Durum = .bos
     @State private var dogrulamaGorevi: Task<Void, Never>?
 
@@ -30,25 +31,29 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             baslik
             anahtarAlani
             modelAlani
-            Toggle("Terminal kisayolu ekle (yzlab-codex)", isOn: $kisayol)
-                .disabled(mesgul)
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Claude Code'u da bagla (terminal + Claude masaustu uygulamasi)", isOn: $claude)
+                    .disabled(mesgul)
+                Toggle("Terminal kisayollari ekle (yzlab-codex, yzlab-claude)", isOn: $kisayol)
+                    .disabled(mesgul)
+            }
             Divider()
             guvence
             Spacer(minLength: 0)
             altBar
         }
         .padding(26)
-        .frame(width: 460, height: 470)
+        .frame(width: 480, height: 540)
     }
 
     private var baslik: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("YapayZekaLab").font(.system(size: 21, weight: .semibold))
-            Text("Codex Kurulumu").font(.system(size: 14)).foregroundStyle(.secondary)
+            Text("Codex + Claude Code Kurulumu").font(.system(size: 14)).foregroundStyle(.secondary)
         }
     }
 
@@ -78,9 +83,12 @@ struct ContentView: View {
         case .kuruluyor(let a):
             Label(a, systemImage: "gearshape").font(.system(size: 11)).foregroundStyle(.secondary)
         case .bitti:
-            Label("Kuruldu. Yeni bir terminal ac ve `codex -p yzlab` yaz.",
+            Label(claude
+                  ? "Kuruldu. Yeni terminal: `codex -p yzlab` ve `claude`. Claude masaustu uygulamasini yeniden ac."
+                  : "Kuruldu. Yeni bir terminal ac ve `codex -p yzlab` yaz.",
                   systemImage: "checkmark.seal.fill")
                 .font(.system(size: 11)).foregroundStyle(.green)
+                .fixedSize(horizontal: false, vertical: true)
         case .hata(let m):
             Label(m, systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 11)).foregroundStyle(.orange)
@@ -98,16 +106,17 @@ struct ContentView: View {
             }
             .labelsHidden()
             .disabled(mesgul)
-            Text("Sonradan degistirebilirsin: \(kurucu.manifest.codex.profileFile) icindeki `model` satiri.")
+            Text("Sonradan degistirebilirsin: \(kurucu.manifest.codex.profileFile) `model` satiri; Claude Code icin settings.json `ANTHROPIC_MODEL`.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var guvence: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Label("ChatGPT Plus ayarlarina dokunulmaz", systemImage: "lock.shield")
+            Label("Mevcut ayarlarin korunur", systemImage: "lock.shield")
                 .font(.system(size: 12, weight: .medium))
-            Text("Kurulum ayri bir profil dosyasi olusturur. Mevcut config.toml ve auth.json aynen kalir; `codex` eskisi gibi, `codex -p yzlab` bizim uzerimizden calisir.")
+            Text("Codex: ayri profil dosyasi; config.toml ve auth.json aynen kalir, `codex` eskisi gibi, `codex -p yzlab` bizim uzerimizden calisir. Claude Code: settings.json'da yalniz `env` blogu yazilir, oncesi `.bak-yzlab` olarak saklanir; Geri Al birebir geri koyar.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if !manifestCanli {
@@ -119,7 +128,7 @@ struct ContentView: View {
 
     private var altBar: some View {
         HStack {
-            if kurucu.kuruluMu {
+            if kurucu.kuruluMu || kurucu.claudeKuruluMu {
                 Button("Geri Al") { kurucu.geriAl(); durum = .hata(kurucu.adim) }
                     .disabled(mesgul)
             }
@@ -162,7 +171,7 @@ struct ContentView: View {
                         try? await Task.sleep(nanoseconds: 200_000_000)
                     }
                 }
-                try await kurucu.kur(anahtar: temiz, model: model, kisayol: kisayol)
+                try await kurucu.kur(anahtar: temiz, model: model, kisayol: kisayol, claude: claude)
                 izle.cancel()
                 durum = .bitti
             } catch {

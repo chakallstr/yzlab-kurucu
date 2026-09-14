@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace YzlabKurucu;
@@ -39,6 +40,31 @@ public sealed class Kurucu
 
     public bool KuruluMu => File.Exists(ProfilYolu);
 
+    /// Claude Code'un karsiligi CLAUDE_CONFIG_DIR. Masaustu uygulamasi (Code sekmesi) da
+    /// ayni dizini okur; profil mekanizmasi yok → settings.json'in `env` blogu.
+    public string ClaudeDizini
+    {
+        get
+        {
+            var h = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+            if (string.IsNullOrWhiteSpace(h))
+                h = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR", EnvironmentVariableTarget.User);
+            if (!string.IsNullOrWhiteSpace(h))
+                return Environment.ExpandEnvironmentVariables(h.Trim());
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _m.Claude.ConfigDir);
+        }
+    }
+    public string ClaudeAyarYolu => Path.Combine(ClaudeDizini, _m.Claude.SettingsFile);
+    /// Ilk yazimdan onceki settings.json — Geri Al bunu birebir geri koyar.
+    public string ClaudeYedekYolu => ClaudeAyarYolu + ".bak-yzlab";
+    /// Ilk yazimda settings.json HIC YOKTU isareti — Geri Al dosyayi siler.
+    public string ClaudeYokIsareti => ClaudeAyarYolu + ".yok-yzlab";
+    public string ClaudeKisayolYolu => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        "Claude Code (YapayZekaLab).lnk");
+    public bool ClaudeKuruluMu => File.Exists(ClaudeYedekYolu) || File.Exists(ClaudeYokIsareti);
+
     // ── 1. Anahtar dogrulama ───────────────────────────────────────────────
 
     public async Task<string> AnahtariDogrulaAsync(string anahtar)
@@ -70,7 +96,7 @@ public sealed class Kurucu
     // ── 2..5 tam kurulum ───────────────────────────────────────────────────
 
     public async Task KurAsync(string anahtar, Manifest.ModelInfo model, bool kisayol,
-                               Action<string> bildir)
+                               Action<string> bildir, bool claude = true)
     {
         bildir("Anahtar dogrulaniyor…");
         await AnahtariDogrulaAsync(anahtar);
@@ -90,26 +116,62 @@ public sealed class Kurucu
             KisayolYaz();
         }
 
-        bildir("Dogrulaniyor…");
+        bildir("Codex dogrulaniyor…");
         Dogrula();
+
+        if (claude)
+        {
+            bildir("Claude Code aranıyor…");
+            await ClaudeHazirlaAsync(bildir);
+
+            bildir("Claude Code ayari yaziliyor…");
+            ClaudeAyarYaz(anahtar, model.Id);
+
+            if (kisayol)
+            {
+                bildir("Claude Code kisayolu…");
+                ClaudeKisayolYaz();
+            }
+
+            bildir("Claude Code dogrulaniyor…");
+            ClaudeDogrula();
+        }
     }
 
     /// Codex KURULUYSA hic dokunma. Boylece musterinin Codex'i acikken de kurulum
     /// yapilabilir: Windows'ta calisan codex.exe npm guncellemesini EBUSY ile kilitler.
+    private async Task NodeHazirlaAsync(Action<string> bildir)
+    {
+        if (KomutVar("npm")) return;
+        bildir("Node.js kuruluyor… (birkac dakika)");
+        await NodeKurAsync();
+    }
+
     private async Task CodexHazirlaAsync(Action<string> bildir)
     {
         if (KomutVar("codex")) return;
-
-        if (!KomutVar("npm"))
-        {
-            bildir("Node.js kuruluyor… (birkac dakika)");
-            await NodeKurAsync();
-        }
+        await NodeHazirlaAsync(bildir);
 
         bildir("Codex CLI kuruluyor… (birkac dakika)");
         var r = Calistir("cmd.exe", $"/d /s /c \"npm install -g {_m.Codex.NpmPackage}\"", 1_200_000);
+        NpmGlobalBiniPathEkle();
         if (!KomutVar("codex"))
             throw new KurulumHatasi("Codex kurulamadi: " + Kisalt(r.Cikti));
+    }
+
+    /// npm'in global bin dizini (Windows'ta prefix'in kendisi: %APPDATA%\npm) yeni kurulan
+    /// Node'da/ozel prefix'te surecimizin PATH'inde OLMAYABILIR (CI'da olculdu: "added 2
+    /// packages" ama `where codex` bos). npm'e sorup PATH'in basina ekliyoruz; boylece hem
+    /// `where codex` hem dogrulamadaki `codex exec` bulur. Kisayol/terminal zaten kayit
+    /// defterindeki PATH'i kullanir.
+    private static void NpmGlobalBiniPathEkle()
+    {
+        var r = Calistir("cmd.exe", "/d /s /c \"npm prefix -g\"", 30_000);
+        var prefix = r.Cikti.Split('\n').Select(x => x.Trim()).LastOrDefault(x => x.Length > 0);
+        if (r.Kod != 0 || string.IsNullOrEmpty(prefix) || !Directory.Exists(prefix)) return;
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        if (!path.Split(';').Any(x => string.Equals(x.TrimEnd('\\'), prefix.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)))
+            Environment.SetEnvironmentVariable("PATH", prefix + ";" + path);
     }
 
     /// ⚠️ winget KULLANMIYORUZ: Windows Server'da hic yok, Win10'da surum surum
@@ -243,6 +305,10 @@ public sealed class Kurucu
                 throw new KurulumHatasi("Model katalogu bozuk indi — tekrar dene.");
             if (!c.Contains("yapayzekalab"))
                 throw new KurulumHatasi("Profil yuklenmedi:\n" + Kisalt(c));
+            // Izolasyon KANITI: codex exec trust kaydini calistigi CODEX_HOME'un config.toml'una
+            // yazar; gecici dizinde yoksa exec baska bir CODEX_HOME'da kostu demektir.
+            if (!File.Exists(Path.Combine(gecici, "config.toml")))
+                throw new KurulumHatasi("Dogrulama izole kosmadi (CODEX_HOME ezildi?).");
         }
         finally
         {
@@ -250,10 +316,130 @@ public sealed class Kurucu
         }
     }
 
+    // ── Claude Code (terminal + Claude masaustu uygulamasi) ───────────────
+
+    private async Task ClaudeHazirlaAsync(Action<string> bildir)
+    {
+        if (KomutVar("claude")) return;
+        await NodeHazirlaAsync(bildir);
+        bildir("Claude Code kuruluyor… (birkac dakika)");
+        var r = Calistir("cmd.exe", $"/d /s /c \"npm install -g {_m.Claude.NpmPackage}\"", 1_200_000);
+        NpmGlobalBiniPathEkle();
+        if (!KomutVar("claude"))
+            throw new KurulumHatasi("Claude Code kurulamadi: " + Kisalt(r.Cikti));
+    }
+
+    /// settings.json'in YALNIZ `env` blogunu duzenler; diger her anahtar (permissions,
+    /// hooks, model…) aynen kalir. Ilk yazimdan once birebir yedek alinir (Geri Al bunu
+    /// geri koyar). Kalinti: env'de ANTHROPIC_API_KEY kalirsa AUTH_TOKEN'i EZER → silinir.
+    public void ClaudeAyarYaz(string anahtar, string modelId)
+    {
+        Directory.CreateDirectory(ClaudeDizini);
+        JsonObject obj;
+        if (File.Exists(ClaudeAyarYolu))
+        {
+            var ham = File.ReadAllText(ClaudeAyarYolu, Encoding.UTF8);
+            if (string.IsNullOrWhiteSpace(ham)) obj = new JsonObject();
+            else
+            {
+                try { obj = JsonNode.Parse(ham) as JsonObject ?? throw new Exception("nesne degil"); }
+                catch { throw new KurulumHatasi($"{ClaudeAyarYolu} gecerli JSON degil — elle duzelt, sonra tekrar dene."); }
+            }
+            // Yedek YALNIZ ilk kurulumda alinir: yeniden kurmak yedegi ezmesin.
+            if (!ClaudeKuruluMu) File.Copy(ClaudeAyarYolu, ClaudeYedekYolu, overwrite: false);
+        }
+        else
+        {
+            obj = new JsonObject();
+            if (!ClaudeKuruluMu) File.WriteAllText(ClaudeYokIsareti, "");
+        }
+
+        var env = obj["env"] as JsonObject ?? new JsonObject();
+        foreach (var k in _m.Claude.RemoveEnvKeys) env.Remove(k);
+        foreach (var (k, v) in _m.Claude.EnvTemplate)
+            env[k] = v.Replace("{{BASE_URL}}", _m.Claude.BaseUrl)
+                      .Replace("{{TOKEN}}", anahtar)
+                      .Replace("{{MODEL}}", modelId)
+                      .Replace("{{SMALL_MODEL}}", _m.Claude.SmallFastModel);
+        obj["env"] = env;
+
+        var json = obj.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
+        File.WriteAllText(ClaudeAyarYolu, json + "\n", new UTF8Encoding(false));
+    }
+
+    private void ClaudeKisayolYaz()
+    {
+        var tip = Type.GetTypeFromProgID("WScript.Shell");
+        if (tip is null) return;
+        dynamic? kabuk = Activator.CreateInstance(tip);
+        if (kabuk is null) return;
+        dynamic k = kabuk.CreateShortcut(ClaudeKisayolYolu);
+        k.TargetPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        k.Arguments = $"/k {_m.Claude.LaunchCommand}";
+        k.Description = "Claude Code — YapayZekaLab uzerinden";
+        k.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        k.Save();
+    }
+
+    /// settings.json'daki env ile Claude Code'un gercekten BIZE gittigini kanitlar.
+    /// IZOLE: gecici CLAUDE_CONFIG_DIR'a yalniz settings.json kopyalanir — musterinin
+    /// oturum/proje kayitlarina (.claude.json, projects/) dokunulmaz.
+    private void ClaudeDogrula()
+    {
+        var gecici = Path.Combine(Path.GetTempPath(), "yzlab-claude-dogrula-" + Guid.NewGuid().ToString("N"));
+        var cfg = Path.Combine(gecici, "cfg");
+        Directory.CreateDirectory(cfg);
+        try
+        {
+            File.Copy(ClaudeAyarYolu, Path.Combine(cfg, _m.Claude.SettingsFile), overwrite: true);
+            var r = Calistir("cmd.exe",
+                $"/d /s /c \"{_m.Claude.LaunchCommand} -p \"Sadece ok yaz\" --output-format json\"",
+                180_000, new() { ["CLAUDE_CONFIG_DIR"] = cfg }, gecici);
+            var c = r.Cikti;
+            if (c.Contains("requires git-bash") || c.Contains("Git Bash"))
+                throw new KurulumHatasi("Claude Code Windows'ta Git for Windows ister: git-scm.com'dan kur, sonra Yeniden Kur.");
+            if (c.Contains("authentication_error") || c.Contains("Invalid API key") || c.Contains("401"))
+                throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis.");
+            if (!(c.Contains("\"stop_reason\"") || c.Contains("\"result\"")) || c.Contains("\"is_error\":true"))
+                throw new KurulumHatasi("Claude Code dogrulama yaniti beklenmedik:\n" + Kisalt(c));
+            // Izolasyon kaniti: claude, CLAUDE_CONFIG_DIR'a .claude.json / projects yazar.
+            if (!File.Exists(Path.Combine(cfg, ".claude.json")) && !Directory.Exists(Path.Combine(cfg, "projects")))
+                throw new KurulumHatasi("Claude Code dogrulama izole kosmadi (CLAUDE_CONFIG_DIR ezildi?).");
+        }
+        finally
+        {
+            try { Directory.Delete(gecici, true); } catch { }
+        }
+    }
+
+    public void ClaudeGeriAl()
+    {
+        try
+        {
+            if (File.Exists(ClaudeYedekYolu))
+            {
+                if (File.Exists(ClaudeAyarYolu)) File.Delete(ClaudeAyarYolu);
+                File.Move(ClaudeYedekYolu, ClaudeAyarYolu);
+            }
+            else if (File.Exists(ClaudeYokIsareti))
+            {
+                if (File.Exists(ClaudeAyarYolu)) File.Delete(ClaudeAyarYolu);
+                File.Delete(ClaudeYokIsareti);
+            }
+        }
+        catch { }
+        try { if (File.Exists(ClaudeKisayolYolu)) File.Delete(ClaudeKisayolYolu); } catch { }
+    }
+
     public void GeriAl()
     {
         foreach (var y in new[] { ProfilYolu, KatalogYolu, KisayolYolu })
             try { if (File.Exists(y)) File.Delete(y); } catch { }
+        ClaudeGeriAl();
     }
 
     // ── yardimcilar ────────────────────────────────────────────────────────
@@ -261,10 +447,11 @@ public sealed class Kurucu
     public readonly record struct Sonuc(int Kod, string Cikti);
 
     public static Sonuc Calistir(string dosya, string arg, int msTimeout,
-                                 Dictionary<string, string>? env = null)
+                                 Dictionary<string, string>? env = null, string? calismaDizini = null)
     {
         var psi = new ProcessStartInfo(dosya, arg)
         {
+            WorkingDirectory = calismaDizini ?? "",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             // ⚠️ stdin KAPALI olmali: `codex exec` stdin bir boru/terminal ise

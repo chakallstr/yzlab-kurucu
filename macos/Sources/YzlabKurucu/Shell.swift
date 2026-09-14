@@ -17,6 +17,22 @@ enum Kabuk {
         return "/opt/homebrew/bin:/usr/local/bin:\(NSHomeDirectory())/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     }()
 
+    /// Kurulum sirasinda kesfedilen ek PATH (npm global bin). Bkz. Kurucu.npmGlobalBiniPathEkle.
+    static var ekPath: String = ""
+
+    /// Komut: kullanicinin .zshenv'i PATH'i EZEBILIR (olculdu) → npm bin dizinini
+    /// biliyorsak TAM YOLLA cagiririz, PATH'e guvenmeyiz.
+    static func komut(_ ad: String) -> String {
+        let tam = ekPath + "/" + ad
+        if !ekPath.isEmpty, FileManager.default.isExecutableFile(atPath: tam) { return "'" + tam + "'" }
+        return ad
+    }
+
+    static func komutVarMi(_ ad: String) -> Bool {
+        if !ekPath.isEmpty, FileManager.default.isExecutableFile(atPath: ekPath + "/" + ad) { return true }
+        return varMi(ad)
+    }
+
     @discardableResult
     static func calistir(_ komut: String, saniye: Double = 120, env ekEnv: [String: String] = [:],
                          sadeceStdout: Bool = false) -> Sonuc {
@@ -29,11 +45,11 @@ enum Kabuk {
         #endif
         p.arguments = [loginKabuk ? "-lc" : "-c", komut]
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = loginPath + ":" + (env["PATH"] ?? "")
+        env["PATH"] = (ekPath.isEmpty ? "" : ekPath + ":") + loginPath + ":" + (env["PATH"] ?? "")
         for (k, v) in ekEnv { env[k] = v }
         p.environment = env
 
-        // ⚠️ stdin KAPALI olmali: `codex exec` stdin bir boru/terminal ise
+        // ⚠️ stdin KAPALI olmali: `codex exec` / `claude -p` stdin bir boru/terminal ise
         // "Reading additional input from stdin..." deyip EOF bekler ve ASILI KALIR.
         p.standardInput = FileHandle.nullDevice
 

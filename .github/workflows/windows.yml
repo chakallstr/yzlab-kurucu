@@ -82,12 +82,19 @@ jobs:
           $cfg0  = Get-Content "$h\config.toml" -Raw
           $auth0 = Get-Content "$h\auth.json" -Raw
           $env:CODEX_HOME = $h
+          # Claude Code: izole CLAUDE_CONFIG_DIR, icinde musterinin "eski" settings.json'u
+          $c = Join-Path $env:RUNNER_TEMP "claude-home"
+          New-Item -ItemType Directory -Force $c | Out-Null
+          $settings0 = "{`n  `"permissions`": {`"allow`": [`"Bash`"]},`n  `"env`": {`"ANTHROPIC_API_KEY`": `"sk-eski`"},`n  `"theme`": `"dark`"`n}`n"
+          Set-Content -Path "$c\settings.json" -Value $settings0 -NoNewline
+          $env:CLAUDE_CONFIG_DIR = $c
 
           $var = Get-Command codex -ErrorAction SilentlyContinue
-          Write-Host "kurulum oncesi codex var mi: $([bool]$var)  (beklenen: False -> kurucu kuracak)"
+          $varc = Get-Command claude -ErrorAction SilentlyContinue
+          Write-Host "kurulum oncesi codex var mi: $([bool]$var)  claude var mi: $([bool]$varc)  (beklenen: False -> kurucu kuracak)"
 
           $p = Start-Process -FilePath ./out/YzlabKurucu.exe `
-                 -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','1' `
+                 -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','1','--claude','1' `
                  -NoNewWindow -Wait -PassThru
           Write-Host "kur cikis kodu: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { throw "kurulum BASARISIZ" }
@@ -108,11 +115,35 @@ jobs:
           if (-not (Test-Path $lnk)) { throw "kisayol yok: $lnk" }
           Write-Host "kisayol: $lnk ($((Get-Item $lnk).Length) bayt)"
 
+          # --- Claude Code invaryantlari ---
+          if (-not (Test-Path "$c\settings.json.bak-yzlab")) { throw "claude yedek yok" }
+          if ((Get-Content "$c\settings.json.bak-yzlab" -Raw) -ne $settings0) { throw "claude yedek birebir degil" }
+          $sj = Get-Content "$c\settings.json" -Raw | ConvertFrom-Json
+          if ($sj.theme -ne 'dark' -or -not $sj.permissions) { throw "claude diger anahtarlar kayboldu" }
+          if ($sj.env.PSObject.Properties.Name -contains 'ANTHROPIC_API_KEY') { throw "kalinti ANTHROPIC_API_KEY silinmedi" }
+          if ($sj.env.ANTHROPIC_BASE_URL -ne 'https://yapayzekalab.org') { throw "claude BASE_URL yanlis: $($sj.env.ANTHROPIC_BASE_URL)" }
+          if ($sj.env.ANTHROPIC_MODEL -ne 'gpt-5.6-luna') { throw "claude MODEL yanlis" }
+          if ($sj.env.ANTHROPIC_AUTH_TOKEN -ne $env:YZLAB_ANAHTAR) { throw "claude AUTH_TOKEN yanlis" }
+          $lnk2 = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Claude Code (YapayZekaLab).lnk'
+          if (-not (Test-Path $lnk2)) { throw "claude kisayol yok: $lnk2" }
+          Write-Host "claude settings.json env OK, kisayol: $lnk2"
+
           # --- bagimsiz kanit: gercek CODEX_HOME ile codex bize gidiyor mu? ---
           $out = & cmd /d /s /c "codex exec -p yzlab --skip-git-repo-check -C `"$env:RUNNER_TEMP`" `"Sadece ok yaz`" < NUL 2>&1" | Out-String
           Write-Host ($out -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY')
-          if ($out -notmatch 'provider: yapayzekalab') { throw "codex exec profili yuklemedi" }
-          if ($out -notmatch 'approval: never')        { throw "hazir ayarlar (approval_policy) yuklenmedi" }
+          if ($out -notmatch 'provider: yapayzekalab')     { throw "codex exec profili yuklemedi" }
+          if ($out -notmatch 'sandbox: danger-full-access') { throw "hazir ayarlar (sandbox_mode) yuklenmedi" }
+
+          # --- bagimsiz kanit: gercek CLAUDE_CONFIG_DIR ile claude bize gidiyor mu? (OAuth yok) ---
+          Push-Location $env:RUNNER_TEMP
+          $env:ANTHROPIC_API_KEY = 'sk-ant-SAHTE'   # kabuk kalintisi settings.json'i ezmemeli
+          $outc = & cmd /d /s /c "claude -p `"Sadece ok yaz`" --output-format json < NUL 2>&1" | Out-String
+          Remove-Item Env:\ANTHROPIC_API_KEY
+          Pop-Location
+          $masked = $outc -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY'
+          Write-Host ($masked.Substring(0, [Math]::Min(700, $masked.Length)))
+          if ($outc -notmatch '"stop_reason"' -or $outc -match '"is_error":true') { throw "claude -p beklenmedik yanit" }
+          if ($outc -notmatch 'gpt-5\.6-luna') { throw "claude bizim modeli kullanmadi" }
 
           # --- geri al ---
           $p2 = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--geri-al' -NoNewWindow -Wait -PassThru
@@ -121,7 +152,10 @@ jobs:
           if (Test-Path $lnk)                      { throw "geri al kisayolu silmedi" }
           if (-not (Test-Path "$h\config.toml"))   { throw "geri al config.toml'u SILDI!" }
           if ((Get-Content "$h\config.toml" -Raw) -ne $cfg0) { throw "geri al sonrasi config.toml farkli" }
-          Write-Host "✓ uctan uca TAM: kur + dogrula + bagimsiz kanit + geri al"
+          if ((Get-Content "$c\settings.json" -Raw) -ne $settings0) { throw "geri al claude settings.json'u birebir geri koymadi" }
+          if (Test-Path "$c\settings.json.bak-yzlab") { throw "geri al claude yedegini kaldirmadi" }
+          if (Test-Path $lnk2) { throw "geri al claude kisayolunu silmedi" }
+          Write-Host "✓ uctan uca TAM (Codex + Claude Code): kur + dogrula + bagimsiz kanit + geri al"
 
   # NODE YOKKEN yol: runner'in Node'u kaldirilir, PATH'ten silinir; kurucu MSI'yi
   # nodejs.org'dan indirip sessiz kurar. Runner ortami musteri PC'sinden farkli
@@ -157,7 +191,7 @@ jobs:
 
           $h = Join-Path $env:RUNNER_TEMP "codex-home2"; New-Item -ItemType Directory -Force $h | Out-Null
           $env:CODEX_HOME = $h
-          $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','0' -NoNewWindow -Wait -PassThru
+          $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','0','--claude','0' -NoNewWindow -Wait -PassThru
           Write-Host "kur cikis kodu: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { throw "Node-yokken kurulum BASARISIZ" }
           if (-not (Test-Path "$h\yzlab.config.toml")) { throw "profil yok" }

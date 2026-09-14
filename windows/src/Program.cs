@@ -33,7 +33,7 @@ internal static class KomutSatiri
     public static int Calistir(string[] args)
     {
         var (m, canli) = Manifest.LoadAsync().GetAwaiter().GetResult();
-        Console.WriteLine("manifest: " + (canli ? "canli" : "gomulu"));
+        Console.WriteLine("manifest: " + (canli ? "canli" : "gomulu") + " (sema v" + m.SchemaVersion + ")");
         var k = new Kurucu(m);
         Console.WriteLine("codex dizini: " + k.CodexDizini);
 
@@ -47,7 +47,7 @@ internal static class KomutSatiri
         var anahtar = Deger("--anahtar", args) ?? Environment.GetEnvironmentVariable("YZLAB_ANAHTAR");
         if (string.IsNullOrWhiteSpace(anahtar))
         {
-            Console.WriteLine("kullanim: --kur --anahtar <yzk_live_…> [--model <id>] [--kisayol 0|1]");
+            Console.WriteLine("kullanim: --kur --anahtar <yzk_live_…> [--model <id>] [--kisayol 0|1] [--claude 0|1]");
             Console.WriteLine("          (anahtar YZLAB_ANAHTAR ortam degiskeninden de okunur)");
             return 2;
         }
@@ -59,12 +59,15 @@ internal static class KomutSatiri
             return 2;
         }
         var kisayol = (Deger("--kisayol", args) ?? "1") != "0";
+        var claude = (Deger("--claude", args) ?? "1") != "0";
+        Console.WriteLine("claude dizini: " + k.ClaudeDizini);
 
         try
         {
-            k.KurAsync(anahtar.Trim(), model, kisayol, s => Console.WriteLine("› " + s))
+            k.KurAsync(anahtar.Trim(), model, kisayol, s => Console.WriteLine("› " + s), claude)
              .GetAwaiter().GetResult();
             Console.WriteLine("✓ kuruldu: " + k.ProfilYolu);
+            if (claude) Console.WriteLine("✓ claude code: " + k.ClaudeAyarYolu);
             return 0;
         }
         catch (Exception e)
@@ -175,7 +178,54 @@ internal static class SelfTest
             try { Directory.Delete(gecici, true); } catch { }
         }
 
-        // 5) Kisayol COM yolu bu makinede calisiyor mu?
+        // 5) Claude Code settings.json birlestirme + yedek + geri al (izole CLAUDE_CONFIG_DIR)
+        var cdir = Path.Combine(Path.GetTempPath(), "yzlab-selftest-claude-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cdir);
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", cdir);
+        try
+        {
+            var kc = new Kurucu(kaynak);
+            Kontrol(kc.ClaudeDizini == cdir, "CLAUDE_CONFIG_DIR dikkate aliniyor");
+            var ayar = Path.Combine(cdir, kaynak.Claude.SettingsFile);
+            var orijinal = "{\n  \"permissions\": {\"allow\": [\"Bash\"]},\n  \"env\": {\"ANTHROPIC_API_KEY\": \"sk-eski\", \"FOO\": \"bar\"},\n  \"model\": \"x\"\n}\n";
+            File.WriteAllText(ayar, orijinal, new UTF8Encoding(false));
+            kc.ClaudeAyarYaz("yzk_live_TESTTESTTESTTEST", "gpt-5.6-luna");
+            Kontrol(File.ReadAllText(kc.ClaudeYedekYolu) == orijinal, "claude yedek birebir");
+            using (var doc = JsonDocument.Parse(File.ReadAllText(ayar)))
+            {
+                var root = doc.RootElement;
+                var env = root.GetProperty("env");
+                Kontrol(root.TryGetProperty("permissions", out _) && root.GetProperty("model").GetString() == "x", "claude diger anahtarlar korundu");
+                Kontrol(env.GetProperty("FOO").GetString() == "bar", "claude env'deki yabanci anahtar korundu");
+                Kontrol(!env.TryGetProperty("ANTHROPIC_API_KEY", out _), "claude kalinti ANTHROPIC_API_KEY silindi");
+                Kontrol(env.GetProperty("ANTHROPIC_AUTH_TOKEN").GetString() == "yzk_live_TESTTESTTESTTEST", "claude AUTH_TOKEN yazildi");
+                Kontrol(env.GetProperty("ANTHROPIC_BASE_URL").GetString() == kaynak.Claude.BaseUrl, "claude BASE_URL yazildi (kok, /v1 yok)");
+                Kontrol(env.GetProperty("ANTHROPIC_MODEL").GetString() == "gpt-5.6-luna", "claude MODEL yazildi");
+                Kontrol(env.GetProperty("ANTHROPIC_SMALL_FAST_MODEL").GetString() == kaynak.Claude.SmallFastModel, "claude SMALL_FAST_MODEL yazildi");
+            }
+            kc.ClaudeAyarYaz("yzk_live_IKINCI", "gpt-5.6-sol");
+            Kontrol(File.ReadAllText(kc.ClaudeYedekYolu) == orijinal, "yeniden kurmak yedegi ezmedi");
+            kc.ClaudeGeriAl();
+            Kontrol(File.ReadAllText(ayar) == orijinal, "claude geri al orijinali birebir geri koydu");
+            Kontrol(!File.Exists(kc.ClaudeYedekYolu), "claude geri al yedegi kaldirdi");
+            File.Delete(ayar);
+            kc.ClaudeAyarYaz("yzk_live_TESTTESTTESTTEST", "gpt-5.6-luna");
+            Kontrol(File.Exists(kc.ClaudeYokIsareti), "claude 'dosya yoktu' isareti");
+            kc.ClaudeGeriAl();
+            Kontrol(!File.Exists(ayar), "claude geri al (dosya yoktu) dosyayi sildi");
+            File.WriteAllText(ayar, "{bozuk");
+            var bozukHata = false;
+            try { kc.ClaudeAyarYaz("x", "y"); } catch (KurulumHatasi) { bozukHata = true; }
+            Kontrol(bozukHata && File.ReadAllText(ayar) == "{bozuk", "bozuk settings.json → hata, dosya dokunulmadi");
+        }
+        catch (Exception e) { Kontrol(false, "claude selftest istisna: " + e.Message); }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", null);
+            try { Directory.Delete(cdir, true); } catch { }
+        }
+
+        // 6) Kisayol COM yolu bu makinede calisiyor mu?
         try
         {
             var tip = Type.GetTypeFromProgID("WScript.Shell");
@@ -183,7 +233,7 @@ internal static class SelfTest
         }
         catch (Exception e) { Kontrol(false, "WScript.Shell: " + e.Message); }
 
-        // 6) Kabuk + stdin kapali calisiyor mu? (codex exec asili kalmasin)
+        // 7) Kabuk + stdin kapali calisiyor mu? (codex exec asili kalmasin)
         var r = Kurucu.Calistir("cmd.exe", "/d /s /c \"echo merhaba\"", 15_000);
         Kontrol(r.Kod == 0 && r.Cikti.Contains("merhaba"), "kabuk calisiyor (stdin kapali)");
 

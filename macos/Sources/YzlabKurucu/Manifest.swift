@@ -3,6 +3,7 @@ import Foundation
 /// Sunucudaki kurulum manifesti. Model / token alan adi / Node adresi degisirse
 /// SADECE sunucudaki JSON duzenlenir — yeni surum dagitmaya gerek kalmaz.
 /// `codex.catalogUrl` `{{CODEX_VERSION}}` tasiyabilir (Installer.katalogAdresi doldurur).
+/// `schemaVersion`: canli manifest gomuluden ESKIYSE (yeni alanlar yok) gomulu kullanilir.
 struct Manifest: Codable {
     struct Api: Codable {
         let baseUrl: String
@@ -29,6 +30,24 @@ struct Manifest: Codable {
         let profileTemplate: String
         let tokenField: String
     }
+    struct ClaudeModel: Codable, Identifiable, Hashable {
+        let id: String
+        let label: String
+    }
+    /// Claude Code (terminal + Claude masaustu uygulamasinin Code sekmesi): ikisi de
+    /// ayni settings.json'i okur; profil mekanizmasi yok → yalniz `env` blogu duzenlenir.
+    struct Claude: Codable {
+        let npmPackage: String
+        let configDir: String
+        let settingsFile: String
+        let baseUrl: String
+        let defaultModel: String
+        let smallFastModel: String
+        let models: [ClaudeModel]
+        let envTemplate: [String: String]
+        let removeEnvKeys: [String]
+        let launchCommand: String
+    }
     struct NodePlatform: Codable {
         let url: String
         let silentArgs: String
@@ -40,6 +59,7 @@ struct Manifest: Codable {
     let schemaVersion: Int
     let api: Api
     let codex: Codex
+    let claude: Claude
     let node: Node
 
     static var manifestUrl: URL {
@@ -53,7 +73,7 @@ struct Manifest: Codable {
         return URL(string: "https://yapayzekalab.org/kurulum/codex.json")!
     }
 
-    /// Once sunucudan cek; ulasilamazsa gomulu surume dus.
+    /// Once sunucudan cek; ulasilamazsa / eski semaysa gomulu surume dus.
     /// Kurulumun internet kesintisinde de calismasi icin.
     static func load() async -> (Manifest, Bool) {
         var req = URLRequest(url: manifestUrl)
@@ -61,7 +81,8 @@ struct Manifest: Codable {
         req.cachePolicy = .reloadIgnoringLocalCacheData
         if let (data, resp) = try? await URLSession.shared.data(for: req),
            (resp as? HTTPURLResponse)?.statusCode == 200,
-           let m = try? JSONDecoder().decode(Manifest.self, from: data) {
+           let m = try? JSONDecoder().decode(Manifest.self, from: data),
+           m.schemaVersion >= embedded.schemaVersion {
             return (m, true)
         }
         return (embedded, false)

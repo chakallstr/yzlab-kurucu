@@ -74,7 +74,50 @@ enum SelfTest {
         kontrol(FileManager.default.fileExists(atPath: cfg) && FileManager.default.fileExists(atPath: auth),
                 "geri al musterinin dosyalarina dokunmadi")
 
-        // 5) Kabuk calisiyor mu (login PATH)?
+        // 5) Claude Code settings.json birlestirme + yedek + geri al (izole CLAUDE_CONFIG_DIR)
+        let cdir = gecici + "/claude"
+        try? FileManager.default.createDirectory(atPath: cdir, withIntermediateDirectories: true)
+        setenv("CLAUDE_CONFIG_DIR", cdir, 1)
+        defer { unsetenv("CLAUDE_CONFIG_DIR") }
+        let kc = Kurucu(manifest: kaynak)
+        kontrol(kc.claudeDizini.path == cdir, "CLAUDE_CONFIG_DIR dikkate aliniyor")
+        let ayar = cdir + "/" + kaynak.claude.settingsFile
+        let orijinal = "{\n  \"permissions\": {\"allow\": [\"Bash\"]},\n  \"env\": {\"ANTHROPIC_API_KEY\": \"sk-eski\", \"FOO\": \"bar\"},\n  \"model\": \"x\"\n}\n"
+        try? orijinal.write(toFile: ayar, atomically: true, encoding: .utf8)
+        do { try kc.claudeAyarYaz(anahtar: "yzk_live_TESTTESTTESTTEST", modelId: "gpt-5.6-luna"); kontrol(true, "claude settings yazildi") }
+        catch { kontrol(false, "claude settings yazildi: \(error)") }
+        let yedek = (try? String(contentsOfFile: kc.claudeYedekYolu.path, encoding: .utf8)) ?? ""
+        kontrol(yedek == orijinal, "claude yedek birebir")
+        if let d = FileManager.default.contents(atPath: ayar),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let env = j["env"] as? [String: Any] {
+            kontrol((j["permissions"] as? [String: Any]) != nil && (j["model"] as? String) == "x", "claude diger anahtarlar korundu")
+            kontrol(env["FOO"] as? String == "bar", "claude env'deki yabanci anahtar korundu")
+            kontrol(env["ANTHROPIC_API_KEY"] == nil, "claude kalinti ANTHROPIC_API_KEY silindi")
+            kontrol(env["ANTHROPIC_AUTH_TOKEN"] as? String == "yzk_live_TESTTESTTESTTEST", "claude AUTH_TOKEN yazildi")
+            kontrol(env["ANTHROPIC_BASE_URL"] as? String == kaynak.claude.baseUrl, "claude BASE_URL yazildi (kok, /v1 yok)")
+            kontrol(env["ANTHROPIC_MODEL"] as? String == "gpt-5.6-luna", "claude MODEL yazildi")
+            kontrol(env["ANTHROPIC_SMALL_FAST_MODEL"] as? String == kaynak.claude.smallFastModel, "claude SMALL_FAST_MODEL yazildi")
+        } else { kontrol(false, "claude settings.json cozulemedi") }
+        // Yeniden kur: yedek EZILMEMELI
+        try? kc.claudeAyarYaz(anahtar: "yzk_live_IKINCI", modelId: "gpt-5.6-sol")
+        kontrol(((try? String(contentsOfFile: kc.claudeYedekYolu.path, encoding: .utf8)) ?? "") == orijinal, "yeniden kurmak yedegi ezmedi")
+        kc.claudeGeriAl()
+        kontrol(((try? String(contentsOfFile: ayar, encoding: .utf8)) ?? "") == orijinal, "claude geri al orijinali birebir geri koydu")
+        kontrol(!FileManager.default.fileExists(atPath: kc.claudeYedekYolu.path), "claude geri al yedegi kaldirdi")
+        // settings.json HIC YOKKEN kur → geri al dosyayi siler
+        try? FileManager.default.removeItem(atPath: ayar)
+        try? kc.claudeAyarYaz(anahtar: "yzk_live_TESTTESTTESTTEST", modelId: "gpt-5.6-luna")
+        kontrol(FileManager.default.fileExists(atPath: kc.claudeYokIsareti.path), "claude 'dosya yoktu' isareti")
+        kc.claudeGeriAl()
+        kontrol(!FileManager.default.fileExists(atPath: ayar), "claude geri al (dosya yoktu) dosyayi sildi")
+        // Bozuk JSON → acik hata, dosyaya dokunma
+        try? "{bozuk".write(toFile: ayar, atomically: true, encoding: .utf8)
+        var bozukHata = false
+        do { try kc.claudeAyarYaz(anahtar: "x", modelId: "y") } catch { bozukHata = true }
+        kontrol(bozukHata && (try? String(contentsOfFile: ayar, encoding: .utf8)) == "{bozuk", "bozuk settings.json → hata, dosya dokunulmadi")
+
+        // 6) Kabuk calisiyor mu (login PATH)?
         kontrol(Kabuk.calistir("echo merhaba", saniye: 10).ciktisi == "merhaba", "kabuk calisiyor")
 
         print("\n\(gecen) gecti, \(kalan) kaldi")

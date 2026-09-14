@@ -13,6 +13,7 @@ public sealed partial class Manifest
     [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; }
     [JsonPropertyName("api")] public ApiInfo Api { get; set; } = new();
     [JsonPropertyName("codex")] public CodexInfo Codex { get; set; } = new();
+    [JsonPropertyName("claude")] public ClaudeInfo Claude { get; set; } = new();
     [JsonPropertyName("node")] public NodeInfo Node { get; set; } = new();
 
     public sealed class ApiInfo
@@ -45,6 +46,28 @@ public sealed partial class Manifest
         [JsonPropertyName("tokenField")] public string TokenField { get; set; } = "";
     }
 
+    public sealed class ClaudeModelInfo
+    {
+        [JsonPropertyName("id")] public string Id { get; set; } = "";
+        [JsonPropertyName("label")] public string Label { get; set; } = "";
+    }
+
+    /// Claude Code (terminal + Claude masaustu uygulamasinin Code sekmesi): ikisi de
+    /// ayni settings.json'i okur; profil mekanizmasi yok → yalniz `env` blogu duzenlenir.
+    public sealed class ClaudeInfo
+    {
+        [JsonPropertyName("npmPackage")] public string NpmPackage { get; set; } = "";
+        [JsonPropertyName("configDir")] public string ConfigDir { get; set; } = ".claude";
+        [JsonPropertyName("settingsFile")] public string SettingsFile { get; set; } = "settings.json";
+        [JsonPropertyName("baseUrl")] public string BaseUrl { get; set; } = "";
+        [JsonPropertyName("defaultModel")] public string DefaultModel { get; set; } = "";
+        [JsonPropertyName("smallFastModel")] public string SmallFastModel { get; set; } = "";
+        [JsonPropertyName("models")] public List<ClaudeModelInfo> Models { get; set; } = new();
+        [JsonPropertyName("envTemplate")] public Dictionary<string, string> EnvTemplate { get; set; } = new();
+        [JsonPropertyName("removeEnvKeys")] public List<string> RemoveEnvKeys { get; set; } = new();
+        [JsonPropertyName("launchCommand")] public string LaunchCommand { get; set; } = "claude";
+    }
+
     public sealed class NodePlatform
     {
         [JsonPropertyName("url")] public string Url { get; set; } = "";
@@ -64,7 +87,9 @@ public sealed partial class Manifest
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             var json = await http.GetStringAsync(Url);
             var m = JsonSerializer.Deserialize<Manifest>(json);
-            if (m is not null && m.Codex.Models.Count > 0) return (m, true);
+            // Canli manifest gomuluden ESKI semadaysa (yeni alanlar yok) gomuluyu kullan.
+            if (m is not null && m.Codex.Models.Count > 0 && m.SchemaVersion >= Embedded.SchemaVersion)
+                return (m, true);
         }
         catch { /* gomuluye dusulur */ }
         return (Embedded, false);
