@@ -204,6 +204,14 @@ public sealed class Kurucu
 
     // ── Katalog (canli API'den, kurulu Codex surumune gore) ───────────────
 
+    /// Codex/Claude ciktisinda GERCEK yetki reddi var mi? Sayilarin icindeki "401"e kanmaz.
+    public static bool YetkiReddiMi(string c)
+    {
+        if (c.Contains("Unauthorized") || c.Contains("authentication_error") || c.Contains("Invalid API key")
+            || c.Contains("invalid_api_key") || c.Contains("gecersiz") || c.Contains("geçersiz")) return true;
+        return Regex.IsMatch(c, @"(?i)(http|status|code)\D{0,4}401(\D|$)");
+    }
+
     /// "codex-cli 0.153.4" → "0.153.4". Yoksa null.
     public static string? SurumAyikla(string s)
     {
@@ -299,7 +307,8 @@ public sealed class Kurucu
                 $"/d /s /c \"codex exec -p {_m.Codex.ProfileName} --skip-git-repo-check -C \"{gecici}\" ok\"",
                 120_000, new() { ["CODEX_HOME"] = gecici });
             var c = r.Cikti;
-            if (c.Contains("401") || c.Contains("gecersiz") || c.Contains("geçersiz"))
+            // ⚠️ Duz "401" arama YANLIS POZITIF verir (token sayisi 8,401, sure 3401ms).
+            if (YetkiReddiMi(c))
                 throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis.");
             if (c.Contains("failed to parse model_catalog_json"))
                 throw new KurulumHatasi("Model katalogu bozuk indi — tekrar dene.");
@@ -402,7 +411,7 @@ public sealed class Kurucu
             var c = r.Cikti;
             if (c.Contains("requires git-bash") || c.Contains("Git Bash"))
                 throw new KurulumHatasi("Claude Code Windows'ta Git for Windows ister: git-scm.com'dan kur, sonra Yeniden Kur.");
-            if (c.Contains("authentication_error") || c.Contains("Invalid API key") || c.Contains("401"))
+            if (YetkiReddiMi(c))
                 throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis.");
             if (!(c.Contains("\"stop_reason\"") || c.Contains("\"result\"")) || c.Contains("\"is_error\":true"))
                 throw new KurulumHatasi("Claude Code dogrulama yaniti beklenmedik:\n" + Kisalt(c));

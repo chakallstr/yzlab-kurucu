@@ -133,6 +133,16 @@ jobs:
           Write-Host ($out -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY')
           if ($out -notmatch 'provider: yapayzekalab')     { throw "codex exec profili yuklemedi" }
           if ($out -notmatch 'sandbox: danger-full-access') { throw "hazir ayarlar (sandbox_mode) yuklenmedi" }
+          # ⚠️ Bu BAGIMSIZ codex exec gercek CODEX_HOME'da kosar; profil danger-full-access oldugu icin
+          # Codex'in KENDISI config.toml'a `[projects."<dizin>"] trust_level` ekler (kurucu degil —
+          # kurucunun dogrulamasi izole dizinde). Kabul edilen tek fark bu blok; baska fark = kurucu dokundu.
+          $cfg1 = Get-Content "$h\config.toml" -Raw
+          $cfgNoProj = ($cfg1 -replace '(?s)\r?\n\s*\[projects\..*$', '')
+          if ($cfgNoProj.TrimEnd() -ne $cfg0.TrimEnd()) {
+            Write-Host "--- config.toml simdi:"; Write-Host $cfg1
+            throw "config.toml'a [projects] trust satiri DISINDA dokunuldu"
+          }
+          Write-Host "config.toml: yalniz Codex'in kendi [projects] trust satiri eklendi (beklenen)"
 
           # --- bagimsiz kanit: gercek CLAUDE_CONFIG_DIR ile claude bize gidiyor mu? (OAuth yok) ---
           Push-Location $env:RUNNER_TEMP
@@ -152,7 +162,7 @@ jobs:
           if (Test-Path "$h\yzlab.config.toml")    { throw "geri al profili silmedi" }
           if (Test-Path $lnk)                      { throw "geri al kisayolu silmedi" }
           if (-not (Test-Path "$h\config.toml"))   { throw "geri al config.toml'u SILDI!" }
-          if ((Get-Content "$h\config.toml" -Raw) -ne $cfg0) { throw "geri al sonrasi config.toml farkli" }
+          if ((Get-Content "$h\config.toml" -Raw) -ne $cfg1) { throw "geri al config.toml'a dokundu" }
           $geri = Get-Content "$c\settings.json" -Raw -ErrorAction SilentlyContinue
           if ($geri -ne $settings0) {
             Write-Host "--- claude dizini:"; Get-ChildItem -Force $c | Format-Table Name,Length | Out-String | Write-Host

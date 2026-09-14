@@ -117,6 +117,13 @@ internal static class SelfTest
                                   : "  bilgi canli manifest YOK — gomuluye dusuldu");
         var kaynak = canliMi ? canliM : gomulu;
 
+        // 3a) Yetki reddi tespiti: sayi icindeki 401 YANLIS POZITIF olmamali
+        Kontrol(!Kurucu.YetkiReddiMi("tokens used\n8,401\nok"), "401 iceren token sayisi ret sayilmadi");
+        Kontrol(!Kurucu.YetkiReddiMi("{\"duration_api_ms\":3401,\"stop_reason\":\"end_turn\"}"), "401 iceren sure ret sayilmadi");
+        Kontrol(Kurucu.YetkiReddiMi("401 Unauthorized: API anahtarı geçersiz veya iptal edilmiş, url: x"), "gercek codex 401 yakalandi");
+        Kontrol(Kurucu.YetkiReddiMi("{\"is_error\":true,\"result\":\"authentication_error\"}"), "gercek claude auth hatasi yakalandi");
+        Kontrol(Kurucu.YetkiReddiMi("error: HTTP 401"), "HTTP 401 yakalandi");
+
         // 3) Surum ayiklama + katalog adresi yer tutucusu
         Kontrol(Kurucu.SurumAyikla("codex-cli 0.153.4") == "0.153.4", "codex surumu ayiklaniyor");
         Kontrol(Kurucu.SurumAyikla("hicbir sey") is null, "surum yoksa null");

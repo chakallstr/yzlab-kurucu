@@ -184,6 +184,14 @@ final class Kurucu: ObservableObject {
 
     // MARK: - Katalog (canli API'den, kurulu Codex surumune gore)
 
+    /// Codex/Claude ciktisinda GERCEK yetki reddi var mi? Sayilarin icindeki "401"e kanmaz.
+    nonisolated static func yetkiReddiMi(_ c: String) -> Bool {
+        if c.contains("Unauthorized") || c.contains("authentication_error") || c.contains("Invalid API key")
+            || c.contains("invalid_api_key") || c.contains("gecersiz") || c.contains("geçersiz") { return true }
+        // "HTTP 401", "status 401", "401 " basta/bosluk sonrasi (rakam bitisik DEGIL)
+        return c.range(of: #"(?i)(http|status|code)\D{0,4}401(\D|$)"#, options: .regularExpression) != nil
+    }
+
     /// "codex-cli 0.153.4" → "0.153.4". Codex yoksa/okunamazsa nil.
     nonisolated static func surumAyikla(_ s: String) -> String? {
         guard let r = s.range(of: #"\d+\.\d+\.\d+"#, options: .regularExpression) else { return nil }
@@ -279,7 +287,9 @@ final class Kurucu: ObservableObject {
             "CODEX_HOME='\(gecici)' \(Kabuk.komut("codex")) exec -p \(manifest.codex.profileName) --skip-git-repo-check -C '\(gecici)' 'ok' 2>&1 | tail -40",
             saniye: 120, env: ["CODEX_HOME": gecici])
         let c = r.ciktisi
-        if c.contains("401") || c.contains("gecersiz") || c.contains("geçersiz") {
+        // ⚠️ Duz "401" arama YANLIS POZITIF verir (token sayisi 8.401, sure 3401ms, oturum id…).
+        // Gercek ret: "401 Unauthorized: API anahtarı geçersiz veya iptal edilmiş, url: …" (gateway).
+        if Kurucu.yetkiReddiMi(c) {
             throw KurulumHatasi.anahtarGecersiz(401)
         }
         if c.contains("failed to parse model_catalog_json") {
@@ -381,7 +391,7 @@ final class Kurucu: ObservableObject {
             "cd '\(gecici)' && CLAUDE_CONFIG_DIR='\(gecici)/cfg' \(Kabuk.komut("claude")) -p 'Sadece ok yaz' --output-format json 2>&1 | tail -c 4000",
             saniye: 180, env: ["CLAUDE_CONFIG_DIR": gecici + "/cfg"])
         let c = r.ciktisi
-        if c.contains("authentication_error") || c.contains("Invalid API key") || c.contains("401") {
+        if Kurucu.yetkiReddiMi(c) {
             throw KurulumHatasi.anahtarGecersiz(401)
         }
         guard c.contains("\"stop_reason\"") || c.contains("\"result\""), !c.contains("\"is_error\":true") else {

@@ -25,6 +25,13 @@ enum SelfTest {
         print(canliMi ? "  bilgi canli manifest CEKILDI" : "  bilgi canli manifest YOK — gomuluye dusuldu")
         let kaynak = canliMi ? canliM : gomulu
 
+        // 3a) Yetki reddi tespiti: sayi icindeki 401 YANLIS POZITIF olmamali
+        kontrol(!Kurucu.yetkiReddiMi("tokens used\n8.401\nok"), "401 iceren token sayisi ret sayilmadi")
+        kontrol(!Kurucu.yetkiReddiMi("{\"duration_api_ms\":3401,\"stop_reason\":\"end_turn\"}"), "401 iceren sure ret sayilmadi")
+        kontrol(Kurucu.yetkiReddiMi("401 Unauthorized: API anahtarı geçersiz veya iptal edilmiş, url: x"), "gercek codex 401 yakalandi")
+        kontrol(Kurucu.yetkiReddiMi("{\"is_error\":true,\"result\":\"authentication_error\"}"), "gercek claude auth hatasi yakalandi")
+        kontrol(Kurucu.yetkiReddiMi("error: HTTP 401"), "HTTP 401 yakalandi")
+
         // 3) Surum ayiklama + katalog adresi yer tutucusu
         kontrol(Kurucu.surumAyikla("codex-cli 0.153.4") == "0.153.4", "codex surumu ayiklaniyor")
         kontrol(Kurucu.surumAyikla("hicbir sey") == nil, "surum yoksa nil")
