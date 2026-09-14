@@ -15,6 +15,10 @@ on:
 jobs:
   derle-ve-sina:
     runs-on: windows-latest
+    # Release'e dosya eklemek icin GITHUB_TOKEN'a yazma izni sart (v0.1.1'de
+    # "Resource not accessible by integration" ile kaldi, exe elle yuklendi).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
