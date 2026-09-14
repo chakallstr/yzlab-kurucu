@@ -194,8 +194,8 @@ elle kontrol et. Console çıktısı bu yolla loga DÜŞÜYOR (PASS/FAIL satırl
 2. ~~macOS kurucu~~ ✅ universal, imzalı, notarize.
 3. ~~macOS notarize~~ ✅.
 4. ~~Windows kurucu~~ ✅ CI'da derlenir + gerçek anahtarla uçtan uca.
-5. ~~`/kurulum` sayfası~~ ✅ `KurucuIndir.tsx` yazıldı, tsc 0 — **canlıya deploy sahip onayı bekliyor**
-   (runbook: scratchpad `canli-web/DEPLOY-KOMUTLARI.sh`; manifest v2 de aynı runbookta).
+5. ~~`/kurulum` sayfası~~ ✅ CANLI 2026-09-15 (`KurucuIndir.tsx` şeridi, 7 dil; BUILD_ID `F0b_RkJgJWtztr3ZqTW3I`).
+   Manifest v2 de canlı (kurucu "manifest: canli (sema v2)" alıyor).
 6. ~~Manifest + katalog canlıya~~ ✅ manifest canlı; katalog statikten API'ye geçti.
 7. ~~GitHub Release~~ ✅ `v0.1.1` yayında (latest; dmg noterli + exe CI'dan). ⚠️ `release: created` olayı
    `gh release create`'te tetiklenmedi (v0.1.0'da exe elle yüklendi) → workflow `published, created`; v0.1.1'de CI kendisi ekledi.
