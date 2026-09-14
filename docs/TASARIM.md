@@ -129,7 +129,7 @@ sahte HOME ile test yapılmaz, CODEX_HOME açıkça verilir.
 ## Komut satırı modları (2026-09-14, iki platform)
 | mod | ne |
 |---|---|
-| `--selftest` | 43 (mac) / 44 (win) invaryant: gömülü manifest, CODEX_HOME/CLAUDE_CONFIG_DIR, dokunmama, settings.json birleştirme+yedek, geri al |
+| `--selftest` | 44 (mac) / 45 (win) invaryant: gömülü manifest, CODEX_HOME/CLAUDE_CONFIG_DIR, dokunmama, settings.json birleştirme+yedek, geri al |
 | `--kur [--anahtar K] [--model id] [--kisayol 0/1] [--claude 0/1]` | başsız kurulum; anahtar `YZLAB_ANAHTAR` env'den de okunur (loglara düşmesin) |
 | `--geri-al` | Codex + Claude Code kurulumunu siler / geri koyar |
 Çıkış kodu: 0 başarı · 1 hata · 2 kullanım. Mac: `main.swift` giriş, pencere modu `YzlabKurucuApp.main()`.
@@ -197,8 +197,10 @@ elle kontrol et. Console çıktısı bu yolla loga DÜŞÜYOR (PASS/FAIL satırl
 5. ~~`/kurulum` sayfası~~ ✅ `KurucuIndir.tsx` yazıldı, tsc 0 — **canlıya deploy sahip onayı bekliyor**
    (runbook: scratchpad `canli-web/DEPLOY-KOMUTLARI.sh`; manifest v2 de aynı runbookta).
 6. ~~Manifest + katalog canlıya~~ ✅ manifest canlı; katalog statikten API'ye geçti.
-7. ~~GitHub Release~~ ✅ `v0.1.0` yayında (dmg + exe, `releases/latest/download/…` 200). ⚠️ `release: created`
-   olayı `gh release create`'te tetiklenmedi → exe ilk sürümde elle yüklendi; workflow `published, created` yapıldı.
+7. ~~GitHub Release~~ ✅ `v0.1.1` yayında (latest; dmg noterli + exe CI'dan). ⚠️ `release: created` olayı
+   `gh release create`'te tetiklenmedi (v0.1.0'da exe elle yüklendi) → workflow `published, created`; v0.1.1'de CI kendisi ekledi.
+   Yeni sürüm: `SURUM` (build.sh) + csproj `Version` + manifest `installer.latestVersion` → `NOTARIZE=1 build.sh` → `gh release create vX dmg --latest`.
+   ⚠️ e2e betikleri sahibin gerçek `~/.local/bin/yzlab-codex`'ini siler (geri-al HOME'a bakar) — testten sonra geri koy; `--selftest` artık dokunmaz.
 8. ~~Gerçek anahtarla uçtan uca~~ ✅ mac yerel + win CI.
 9. ~~`/v1/balance` tier~~ → GEREKSİZ: 09-10 boyama sonrası GENEL = BALLS = 450k
    (`ballsTierContextWindow` manifestten kaldırıldı). Kademe yeniden ayrışırsa katalog zaten
