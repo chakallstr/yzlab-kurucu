@@ -9,16 +9,27 @@ struct Sonuc {
 enum Kabuk {
     /// Codex'i login-shell PATH'iyle arar. Kullanicinin nvm/homebrew/npm-prefix
     /// kurulumu yalnizca login shell'de PATH'te olabilir — GUI uygulamasi onu gormez.
-    static let loginPath = "/opt/homebrew/bin:/usr/local/bin:\(NSHomeDirectory())/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    static let loginPath: String = {
+        #if DEBUG
+        // Yalniz DEBUG: "codex yok" yolunu bu makinede test edebilmek icin PATH daraltilabilir.
+        if let p = ProcessInfo.processInfo.environment["YZLAB_LOGIN_PATH"], !p.isEmpty { return p }
+        #endif
+        return "/opt/homebrew/bin:/usr/local/bin:\(NSHomeDirectory())/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    }()
 
     @discardableResult
-    static func calistir(_ komut: String, saniye: Double = 120) -> Sonuc {
+    static func calistir(_ komut: String, saniye: Double = 120, env ekEnv: [String: String] = [:]) -> Sonuc {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         p.arguments = ["-lc", komut]
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = loginPath + ":" + (env["PATH"] ?? "")
+        for (k, v) in ekEnv { env[k] = v }
         p.environment = env
+
+        // ⚠️ stdin KAPALI olmali: `codex exec` stdin bir boru/terminal ise
+        // "Reading additional input from stdin..." deyip EOF bekler ve ASILI KALIR.
+        p.standardInput = FileHandle.nullDevice
 
         let pipe = Pipe()
         p.standardOutput = pipe
@@ -28,15 +39,25 @@ enum Kabuk {
             return Sonuc(cikisKodu: 127, ciktisi: "calistirilamadi: \(error.localizedDescription)")
         }
 
+        // Ciktiyi ARKA PLANDA oku: boru dolarsa (64 KB) surec bloklanir, biz de
+        // waitUntilExit'te sonsuza kadar bekleriz.
+        var data = Data()
+        let okuma = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
+            okuma.signal()
+        }
+
         // macOS'ta `timeout` yok — kendi zaman asimimizi kuruyoruz.
         let bitti = DispatchSemaphore(value: 0)
         DispatchQueue.global().async { p.waitUntilExit(); bitti.signal() }
         if bitti.wait(timeout: .now() + saniye) == .timedOut {
             p.terminate()
+            _ = okuma.wait(timeout: .now() + 5)
             return Sonuc(cikisKodu: 124, ciktisi: "zaman asimi (\(Int(saniye)) sn)")
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        okuma.wait()
         return Sonuc(cikisKodu: p.terminationStatus,
                      ciktisi: String(data: data, encoding: .utf8)?
                         .trimmingCharacters(in: .whitespacesAndNewlines) ?? "")

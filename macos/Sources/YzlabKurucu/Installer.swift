@@ -21,8 +21,10 @@ struct Bakiye { let tl: String }
 
 @MainActor
 final class Kurucu: ObservableObject {
-    @Published var adim: String = ""
+    @Published var adim: String = "" { didSet { bildirici?(adim) } }
     @Published var calisiyor = false
+    /// Bassiz modda adimlari stdout'a yazmak icin (GUI'de nil).
+    var bildirici: ((String) -> Void)?
 
     let manifest: Manifest
     init(manifest: Manifest) { self.manifest = manifest }
@@ -79,7 +81,7 @@ final class Kurucu: ObservableObject {
         try await codexHazirla()
 
         adim = "Model katalogu indiriliyor…"
-        try await kataloguIndir()
+        try await kataloguIndir(anahtar: anahtar)
 
         adim = "Profil yaziliyor…"
         try profiliYaz(anahtar: anahtar, model: model)
@@ -120,12 +122,37 @@ final class Kurucu: ObservableObject {
         }
     }
 
-    private func kataloguIndir() async throws {
-        var req = URLRequest(url: URL(string: manifest.codex.catalogUrl)!)
+    // MARK: - Katalog (canli API'den, kurulu Codex surumune gore)
+
+    /// "codex-cli 0.153.4" → "0.153.4". Codex yoksa/okunamazsa nil.
+    nonisolated static func surumAyikla(_ s: String) -> String? {
+        guard let r = s.range(of: #"\d+\.\d+\.\d+"#, options: .regularExpression) else { return nil }
+        return String(s[r])
+    }
+
+    func codexSurumu() -> String? {
+        Kurucu.surumAyikla(Kabuk.calistir("codex --version", saniye: 20).ciktisi)
+    }
+
+    /// Manifestteki katalog adresi `{{CODEX_VERSION}}` tasiyabilir: gateway kurulu
+    /// Codex surumune gore dogru semayi doner. Surum bulunamazsa minimum surum yazilir.
+    func katalogAdresi(surum: String?) -> URL {
+        let v = surum ?? manifest.codex.minVersion
+        let s = manifest.codex.catalogUrl.replacingOccurrences(
+            of: "{{CODEX_VERSION}}",
+            with: v.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? v)
+        return URL(string: s) ?? URL(string: manifest.codex.catalogUrl)!
+    }
+
+    private func kataloguIndir(anahtar: String) async throws {
+        var req = URLRequest(url: katalogAdresi(surum: codexSurumu()))
         req.timeoutInterval = 30
+        // Anahtarla istenir: gateway musterinin kendi kademesine gore katalog verir.
+        req.setValue(manifest.api.authPrefix + anahtar, forHTTPHeaderField: "Authorization")
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
-              (try? JSONSerialization.jsonObject(with: data)) != nil else {
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let modeller = j["models"] as? [Any], !modeller.isEmpty else {
             throw KurulumHatasi.agHatasi("model katalogu indirilemedi")
         }
         try FileManager.default.createDirectory(at: codexDizini, withIntermediateDirectories: true)
@@ -135,7 +162,7 @@ final class Kurucu: ObservableObject {
 
     /// SADECE kendi dosyamizi yazar. config.toml ve auth.json'a DOKUNMAZ →
     /// musterinin ChatGPT Plus oturumu bozulmaz.
-    private func profiliYaz(anahtar: String, model: Manifest.Model) throws {
+    func profiliYaz(anahtar: String, model: Manifest.Model) throws {
         let icerik = manifest.codex.profileTemplate
             .replacingOccurrences(of: "{{MODEL}}", with: model.id)
             .replacingOccurrences(of: "{{CONTEXT}}", with: String(model.contextWindow))
@@ -166,10 +193,23 @@ final class Kurucu: ObservableObject {
     }
 
     /// Profilin gercekten yuklendigini ve BIZE gittigini kanitlar.
+    ///
+    /// IZOLE calisir: gecici bir CODEX_HOME'a yalniz bizim profil kopyalanir (katalog
+    /// yolu gercek dosyaya bakar). Sebep: `codex exec` calistigi dizin icin config.toml'a
+    /// `[projects.*] trust_level` YAZAR (0.153'te olculdu) — musterinin config.toml'una
+    /// dokunmama sozunu bozmamak ve musterinin MCP sunucularini bosuna baslatmamak icin.
     private func dogrula() throws {
+        let gecici = NSTemporaryDirectory() + "yzlab-dogrula-" + UUID().uuidString
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: gecici, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: gecici) }
+        do {
+            try fm.copyItem(at: profilYolu, to: URL(fileURLWithPath: gecici).appendingPathComponent(manifest.codex.profileFile))
+        } catch { throw KurulumHatasi.yazilamadi("dogrulama kopyasi: \(error.localizedDescription)") }
+
         let r = Kabuk.calistir(
-            "codex exec -p \(manifest.codex.profileName) --skip-git-repo-check 'ok' 2>&1 | tail -40",
-            saniye: 120)
+            "codex exec -p \(manifest.codex.profileName) --skip-git-repo-check -C '\(gecici)' 'ok' 2>&1 | tail -40",
+            saniye: 120, env: ["CODEX_HOME": gecici])
         let c = r.ciktisi
         if c.contains("401") || c.contains("gecersiz") || c.contains("geçersiz") {
             throw KurulumHatasi.anahtarGecersiz(401)

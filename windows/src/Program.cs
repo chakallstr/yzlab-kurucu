@@ -9,11 +9,69 @@ internal static class Program
     {
         if (args.Length > 0 && args[0] == "--selftest")
             return SelfTest.Calistir();
+        if (args.Contains("--kur") || args.Contains("--geri-al"))
+            return KomutSatiri.Calistir(args);
 
         ApplicationConfiguration.Initialize();
         var (m, canli) = Manifest.LoadAsync().GetAwaiter().GetResult();
         Application.Run(new MainForm(m, canli));
         return 0;
+    }
+}
+
+/// Bassiz (headless) kurulum: `YzlabKurucu.exe --kur --anahtar yzk_live_… [--model id] [--kisayol 0|1]`
+/// Anahtar `YZLAB_ANAHTAR` ortam degiskeninden de alinabilir (CI loglarina dusmesin diye).
+/// `--geri-al` kurulumu siler. Cikis kodu: 0 basari, 1 hata, 2 kullanim hatasi.
+internal static class KomutSatiri
+{
+    private static string? Deger(string ad, string[] args)
+    {
+        var i = Array.IndexOf(args, ad);
+        return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+
+    public static int Calistir(string[] args)
+    {
+        var (m, canli) = Manifest.LoadAsync().GetAwaiter().GetResult();
+        Console.WriteLine("manifest: " + (canli ? "canli" : "gomulu"));
+        var k = new Kurucu(m);
+        Console.WriteLine("codex dizini: " + k.CodexDizini);
+
+        if (args.Contains("--geri-al"))
+        {
+            k.GeriAl();
+            Console.WriteLine("✓ geri alindi");
+            return 0;
+        }
+
+        var anahtar = Deger("--anahtar", args) ?? Environment.GetEnvironmentVariable("YZLAB_ANAHTAR");
+        if (string.IsNullOrWhiteSpace(anahtar))
+        {
+            Console.WriteLine("kullanim: --kur --anahtar <yzk_live_…> [--model <id>] [--kisayol 0|1]");
+            Console.WriteLine("          (anahtar YZLAB_ANAHTAR ortam degiskeninden de okunur)");
+            return 2;
+        }
+        var modelId = Deger("--model", args) ?? m.Codex.DefaultModel;
+        var model = m.Codex.Models.FirstOrDefault(x => x.Id == modelId);
+        if (model is null)
+        {
+            Console.WriteLine($"bilinmeyen model: {modelId} — secenekler: {string.Join(", ", m.Codex.Models.Select(x => x.Id))}");
+            return 2;
+        }
+        var kisayol = (Deger("--kisayol", args) ?? "1") != "0";
+
+        try
+        {
+            k.KurAsync(anahtar.Trim(), model, kisayol, s => Console.WriteLine("› " + s))
+             .GetAwaiter().GetResult();
+            Console.WriteLine("✓ kuruldu: " + k.ProfilYolu);
+            return 0;
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("✗ " + e.Message);
+            return 1;
+        }
     }
 }
 
@@ -41,6 +99,7 @@ internal static class SelfTest
         Kontrol(!string.IsNullOrEmpty(gomulu.Codex.ProfileTemplate), "profil sablonu dolu");
         Kontrol(gomulu.Codex.Models.Any(x => x.Id == gomulu.Codex.DefaultModel),
                 "varsayilan model listede var");
+        Kontrol(gomulu.Codex.CatalogUrl.StartsWith("https://"), "katalog adresi https");
 
         // 2) Canli manifest ve katalog gercekten cekilebiliyor mu?
         var (canliM, canliMi) = Manifest.LoadAsync().GetAwaiter().GetResult();
@@ -48,12 +107,18 @@ internal static class SelfTest
                                   : "  bilgi canli manifest YOK — gomuluye dusuldu");
         var kaynak = canliMi ? canliM : gomulu;
 
+        // 3) Surum ayiklama + katalog adresi yer tutucusu
+        Kontrol(Kurucu.SurumAyikla("codex-cli 0.153.4") == "0.153.4", "codex surumu ayiklaniyor");
+        Kontrol(Kurucu.SurumAyikla("hicbir sey") is null, "surum yoksa null");
+
         // Sunucu manifesti servis ediyorsa katalogu da ETMEK ZORUNDA -> sert hata.
         // Sunucuya hic ulasilamiyorsa (gomuluye dusuldu) bu bir CI arizasi degil, bilgi.
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            var kat = http.GetStringAsync(kaynak.Codex.CatalogUrl).GetAwaiter().GetResult();
+            var adres = new Kurucu(kaynak).KatalogAdresi("0.153.4");
+            Kontrol(!adres.Contains("{{"), "katalog adresinde yer tutucu kalmadi");
+            var kat = http.GetStringAsync(adres).GetAwaiter().GetResult();
             using var doc = JsonDocument.Parse(kat);
             var adet = doc.RootElement.GetProperty("models").GetArrayLength();
             Kontrol(adet > 0, $"model katalogu indi ve cozuldu ({adet} model)");
@@ -64,7 +129,7 @@ internal static class SelfTest
             else Console.WriteLine("  bilgi model katalogu atlandi (sunucu erisilemez): " + e.Message);
         }
 
-        // 3) Izole bir CODEX_HOME kurup gercek yazma yolunu calistir.
+        // 4) Izole bir CODEX_HOME kurup gercek yazma yolunu calistir.
         var gecici = Path.Combine(Path.GetTempPath(), "yzlab-selftest-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(gecici);
         Environment.SetEnvironmentVariable("CODEX_HOME", gecici);
@@ -110,13 +175,17 @@ internal static class SelfTest
             try { Directory.Delete(gecici, true); } catch { }
         }
 
-        // 4) Kisayol COM yolu bu makinede calisiyor mu?
+        // 5) Kisayol COM yolu bu makinede calisiyor mu?
         try
         {
             var tip = Type.GetTypeFromProgID("WScript.Shell");
             Kontrol(tip is not null, "WScript.Shell COM erisilebilir");
         }
         catch (Exception e) { Kontrol(false, "WScript.Shell: " + e.Message); }
+
+        // 6) Kabuk + stdin kapali calisiyor mu? (codex exec asili kalmasin)
+        var r = Kurucu.Calistir("cmd.exe", "/d /s /c \"echo merhaba\"", 15_000);
+        Kontrol(r.Kod == 0 && r.Cikti.Contains("merhaba"), "kabuk calisiyor (stdin kapali)");
 
         Console.WriteLine($"\n{_gecen} gecti, {_kalan} kaldi");
         return _kalan == 0 ? 0 : 1;

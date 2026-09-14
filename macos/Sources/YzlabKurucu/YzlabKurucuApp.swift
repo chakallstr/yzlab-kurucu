@@ -1,6 +1,7 @@
 import SwiftUI
 
-@main
+// @main YOK: giris noktasi main.swift (komut satiri modlari icin). Pencere modu
+// oradan `YzlabKurucuApp.main()` ile acilir.
 struct YzlabKurucuApp: App {
     @State private var manifest: Manifest?
     @State private var canli = false

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace YzlabKurucu;
 
@@ -78,7 +79,7 @@ public sealed class Kurucu
         await CodexHazirlaAsync(bildir);
 
         bildir("Model katalogu indiriliyor…");
-        await KataloguIndirAsync();
+        await KataloguIndirAsync(anahtar);
 
         bildir("Profil yaziliyor…");
         ProfiliYaz(anahtar, model);
@@ -139,15 +140,49 @@ public sealed class Kurucu
         Environment.SetEnvironmentVariable("PATH", makine + ";" + kullanici);
     }
 
-    private async Task KataloguIndirAsync()
+    // ── Katalog (canli API'den, kurulu Codex surumune gore) ───────────────
+
+    /// "codex-cli 0.153.4" → "0.153.4". Yoksa null.
+    public static string? SurumAyikla(string s)
+    {
+        var m = Regex.Match(s ?? "", @"\d+\.\d+\.\d+");
+        return m.Success ? m.Value : null;
+    }
+
+    public string? CodexSurumu() =>
+        SurumAyikla(Calistir("cmd.exe", "/d /s /c \"codex --version\"", 20_000).Cikti);
+
+    /// Manifestteki katalog adresi `{{CODEX_VERSION}}` tasiyabilir: gateway kurulu
+    /// Codex surumune gore dogru semayi doner. Surum bulunamazsa minimum surum yazilir.
+    public string KatalogAdresi(string? surum)
+    {
+        var v = string.IsNullOrEmpty(surum) ? _m.Codex.MinVersion : surum;
+        return _m.Codex.CatalogUrl.Replace("{{CODEX_VERSION}}", Uri.EscapeDataString(v ?? ""));
+    }
+
+    private async Task KataloguIndirAsync(string anahtar)
     {
         string json;
         using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) })
         {
-            try { json = await http.GetStringAsync(_m.Codex.CatalogUrl); }
+            using var req = new HttpRequestMessage(HttpMethod.Get, KatalogAdresi(CodexSurumu()));
+            // Anahtarla istenir: gateway musterinin kendi kademesine gore katalog verir.
+            req.Headers.TryAddWithoutValidation("Authorization", _m.Api.AuthPrefix + anahtar);
+            try
+            {
+                var resp = await http.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                    throw new Exception($"HTTP {(int)resp.StatusCode}");
+                json = await resp.Content.ReadAsStringAsync();
+            }
             catch (Exception e) { throw new KurulumHatasi("Model katalogu indirilemedi: " + e.Message); }
         }
-        try { using var _ = JsonDocument.Parse(json); }
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("models", out var ms) || ms.GetArrayLength() == 0)
+                throw new Exception("models bos");
+        }
         catch { throw new KurulumHatasi("Model katalogu bozuk indi — tekrar dene."); }
 
         Directory.CreateDirectory(CodexDizini);
@@ -186,17 +221,33 @@ public sealed class Kurucu
     }
 
     /// Profilin gercekten yuklendigini ve BIZE gittigini kanitlar.
+    ///
+    /// IZOLE calisir: gecici bir CODEX_HOME'a yalniz bizim profil kopyalanir (katalog
+    /// yolu gercek dosyaya bakar). Sebep: `codex exec` calistigi dizin icin config.toml'a
+    /// `[projects.*] trust_level` YAZAR (0.153'te olculdu) — musterinin config.toml'una
+    /// dokunmama sozunu bozmamak ve musterinin MCP sunucularini bosuna baslatmamak icin.
     private void Dogrula()
     {
-        var r = Calistir("cmd.exe",
-            $"/d /s /c \"codex exec -p {_m.Codex.ProfileName} --skip-git-repo-check ok\"", 120_000);
-        var c = r.Cikti;
-        if (c.Contains("401") || c.Contains("gecersiz") || c.Contains("geçersiz"))
-            throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis.");
-        if (c.Contains("failed to parse model_catalog_json"))
-            throw new KurulumHatasi("Model katalogu bozuk indi — tekrar dene.");
-        if (!c.Contains("yapayzekalab"))
-            throw new KurulumHatasi("Profil yuklenmedi:\n" + Kisalt(c));
+        var gecici = Path.Combine(Path.GetTempPath(), "yzlab-dogrula-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(gecici);
+        try
+        {
+            File.Copy(ProfilYolu, Path.Combine(gecici, _m.Codex.ProfileFile), overwrite: true);
+            var r = Calistir("cmd.exe",
+                $"/d /s /c \"codex exec -p {_m.Codex.ProfileName} --skip-git-repo-check -C \"{gecici}\" ok\"",
+                120_000, new() { ["CODEX_HOME"] = gecici });
+            var c = r.Cikti;
+            if (c.Contains("401") || c.Contains("gecersiz") || c.Contains("geçersiz"))
+                throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis.");
+            if (c.Contains("failed to parse model_catalog_json"))
+                throw new KurulumHatasi("Model katalogu bozuk indi — tekrar dene.");
+            if (!c.Contains("yapayzekalab"))
+                throw new KurulumHatasi("Profil yuklenmedi:\n" + Kisalt(c));
+        }
+        finally
+        {
+            try { Directory.Delete(gecici, true); } catch { }
+        }
     }
 
     public void GeriAl()
@@ -209,30 +260,39 @@ public sealed class Kurucu
 
     public readonly record struct Sonuc(int Kod, string Cikti);
 
-    public static Sonuc Calistir(string dosya, string arg, int msTimeout)
+    public static Sonuc Calistir(string dosya, string arg, int msTimeout,
+                                 Dictionary<string, string>? env = null)
     {
         var psi = new ProcessStartInfo(dosya, arg)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // ⚠️ stdin KAPALI olmali: `codex exec` stdin bir boru/terminal ise
+            // "Reading additional input from stdin..." deyip EOF bekler ve ASILI KALIR.
+            RedirectStandardInput = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        if (env is not null)
+            foreach (var (k, v) in env) psi.Environment[k] = v;
+
         using var p = Process.Start(psi);
         if (p is null) return new Sonuc(127, "calistirilamadi");
+        p.StandardInput.Close();
 
         var sb = new StringBuilder();
-        p.OutputDataReceived += (_, e) => { if (e.Data is not null) sb.AppendLine(e.Data); };
-        p.ErrorDataReceived += (_, e) => { if (e.Data is not null) sb.AppendLine(e.Data); };
+        p.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (sb) sb.AppendLine(e.Data); };
+        p.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (sb) sb.AppendLine(e.Data); };
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
 
         if (!p.WaitForExit(msTimeout))
         {
             try { p.Kill(true); } catch { }
-            return new Sonuc(124, sb + "\n(zaman asimi)");
+            lock (sb) return new Sonuc(124, sb + "\n(zaman asimi)");
         }
-        return new Sonuc(p.ExitCode, sb.ToString().Trim());
+        p.WaitForExit(); // async okuma tamponlari bosalsin
+        lock (sb) return new Sonuc(p.ExitCode, sb.ToString().Trim());
     }
 
     public static bool KomutVar(string komut) =>

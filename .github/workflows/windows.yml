@@ -24,7 +24,7 @@ jobs:
         run: dotnet publish windows/src/YzlabKurucu.csproj -c Release -o out
 
       - name: Kendi kendini sina
-        # Windows makinemiz yok; kurulum mantiginin TEK dogrulamasi bu.
+        # Windows makinemiz yok; kurulum mantiginin ILK dogrulamasi bu.
         # ⚠️ WinExe (GUI alt sistemi) oldugu icin PowerShell onu BEKLEMEZ ve
         # cikis kodunu okumaz -> test kalsa bile is yesil gorunur.
         # Start-Process -Wait -PassThru ile beklet ve kodu ELLE kontrol et.
@@ -51,3 +51,116 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: out/YzlabKurucu.exe
+
+  # GERCEK ANAHTARLA UCTAN UCA: runner'da codex YOK -> kurucu npm ile kurar,
+  # katalogu canli API'den ceker, profili yazar, kisayolu koyar, codex exec ile
+  # dogrular. Sonra bagimsiz kanit + geri alma. Musteri dosyalarina dokunmama
+  # invaryanti burada da gercek dosyalarla olculur.
+  # Anahtar: repo secret YZLAB_TEST_KEY (fork PR'larina verilmez -> orada atlanir).
+  uctan-uca:
+    name: Gercek anahtarla uctan uca
+    needs: derle-ve-sina
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: YzlabKurucu-exe
+          path: out
+
+      - name: Kur (codex yok → npm ile kurar) → dogrula → geri al
+        shell: pwsh
+        env:
+          YZLAB_ANAHTAR: ${{ secrets.YZLAB_TEST_KEY }}
+        run: |
+          if (-not $env:YZLAB_ANAHTAR) { Write-Host "::warning::YZLAB_TEST_KEY tanimli degil, uctan uca test ATLANDI"; exit 0 }
+          $h = Join-Path $env:RUNNER_TEMP "codex-home"
+          New-Item -ItemType Directory -Force $h | Out-Null
+          Set-Content -Path "$h\config.toml" -Value 'model = "kendi-modelim"' -NoNewline
+          Set-Content -Path "$h\auth.json"   -Value '{"auth_mode":"chatgpt"}' -NoNewline
+          $cfg0  = Get-Content "$h\config.toml" -Raw
+          $auth0 = Get-Content "$h\auth.json" -Raw
+          $env:CODEX_HOME = $h
+
+          $var = Get-Command codex -ErrorAction SilentlyContinue
+          Write-Host "kurulum oncesi codex var mi: $([bool]$var)  (beklenen: False -> kurucu kuracak)"
+
+          $p = Start-Process -FilePath ./out/YzlabKurucu.exe `
+                 -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','1' `
+                 -NoNewWindow -Wait -PassThru
+          Write-Host "kur cikis kodu: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "kurulum BASARISIZ" }
+
+          # --- invaryantlar ---
+          if (-not (Test-Path "$h\yzlab.config.toml"))        { throw "profil yok" }
+          if (-not (Test-Path "$h\yzlab-model-catalog.json")) { throw "katalog yok" }
+          if ((Get-Content "$h\config.toml" -Raw) -ne $cfg0)  { throw "config.toml DEGISTI" }
+          if ((Get-Content "$h\auth.json" -Raw) -ne $auth0)   { throw "auth.json DEGISTI" }
+          $prof = Get-Content "$h\yzlab.config.toml" -Raw
+          if ($prof -match '\{\{')              { throw "sablonda yer tutucu kaldi" }
+          if ($prof -notmatch 'gpt-5\.6-luna')  { throw "model yazilmadi" }
+          if ($prof -notmatch 'yapayzekalab\.org/v1') { throw "base_url yazilmadi" }
+          $kat = Get-Content "$h\yzlab-model-catalog.json" -Raw | ConvertFrom-Json
+          Write-Host "katalog model sayisi: $($kat.models.Count)"
+          if ($kat.models.Count -lt 1) { throw "katalog bos" }
+          $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex (YapayZekaLab).lnk'
+          if (-not (Test-Path $lnk)) { throw "kisayol yok: $lnk" }
+          Write-Host "kisayol: $lnk ($((Get-Item $lnk).Length) bayt)"
+
+          # --- bagimsiz kanit: gercek CODEX_HOME ile codex bize gidiyor mu? ---
+          $out = & cmd /d /s /c "codex exec -p yzlab --skip-git-repo-check -C `"$env:RUNNER_TEMP`" `"Sadece ok yaz`" < NUL 2>&1" | Out-String
+          Write-Host ($out -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY')
+          if ($out -notmatch 'provider: yapayzekalab') { throw "codex exec profili yuklemedi" }
+          if ($out -notmatch 'approval: never')        { throw "hazir ayarlar (approval_policy) yuklenmedi" }
+
+          # --- geri al ---
+          $p2 = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--geri-al' -NoNewWindow -Wait -PassThru
+          if ($p2.ExitCode -ne 0)                  { throw "geri al basarisiz" }
+          if (Test-Path "$h\yzlab.config.toml")    { throw "geri al profili silmedi" }
+          if (Test-Path $lnk)                      { throw "geri al kisayolu silmedi" }
+          if (-not (Test-Path "$h\config.toml"))   { throw "geri al config.toml'u SILDI!" }
+          if ((Get-Content "$h\config.toml" -Raw) -ne $cfg0) { throw "geri al sonrasi config.toml farkli" }
+          Write-Host "✓ uctan uca TAM: kur + dogrula + bagimsiz kanit + geri al"
+
+  # NODE YOKKEN yol: runner'in Node'u kaldirilir, PATH'ten silinir; kurucu MSI'yi
+  # nodejs.org'dan indirip sessiz kurar. Runner ortami musteri PC'sinden farkli
+  # (UAC yok, onceden kurulu Node) -> bu is BILGI amacli, kirmizi olursa release'i
+  # durdurmaz (continue-on-error). Sonucu her calismada oku.
+  node-yokken:
+    name: Node yokken (MSI yolu, bilgi)
+    needs: derle-ve-sina
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: YzlabKurucu-exe
+          path: out
+
+      - name: Node'u kaldir, PATH'ten sil, kurucuyu calistir
+        shell: pwsh
+        env:
+          YZLAB_ANAHTAR: ${{ secrets.YZLAB_TEST_KEY }}
+        run: |
+          if (-not $env:YZLAB_ANAHTAR) { Write-Host "::warning::YZLAB_TEST_KEY yok, atlandi"; exit 0 }
+          # 1) Runner'in Node'unu kaldir (MSI ise) — yoksa sadece PATH'ten gizle
+          $urun = Get-CimInstance Win32_Product -Filter "Name like 'Node.js%'" -ErrorAction SilentlyContinue
+          if ($urun) { Write-Host "kaldiriliyor: $($urun.Name) $($urun.Version)"; $null = $urun | Invoke-CimMethod -MethodName Uninstall }
+          else { Write-Host "MSI Node bulunamadi (hostedtoolcache olabilir); yalniz PATH'ten gizleniyor" }
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notmatch 'node|npm' }) -join ';'
+          [Environment]::SetEnvironmentVariable('PATH', (([Environment]::GetEnvironmentVariable('PATH','Machine') -split ';') | Where-Object { $_ -notmatch 'node|npm' }) -join ';', 'Machine')
+          $n = Get-Command node -ErrorAction SilentlyContinue; $c = Get-Command codex -ErrorAction SilentlyContinue
+          Write-Host "node var mi: $([bool]$n)  codex var mi: $([bool]$c)  (ikisi de False olmali)"
+
+          $h = Join-Path $env:RUNNER_TEMP "codex-home2"; New-Item -ItemType Directory -Force $h | Out-Null
+          $env:CODEX_HOME = $h
+          $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','0' -NoNewWindow -Wait -PassThru
+          Write-Host "kur cikis kodu: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "Node-yokken kurulum BASARISIZ" }
+          if (-not (Test-Path "$h\yzlab.config.toml")) { throw "profil yok" }
+          $env:PATH = [Environment]::GetEnvironmentVariable('PATH','Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH','User')
+          Write-Host "kurulan node: $(& node --version)  codex: $(& cmd /c 'codex --version')"
+          Write-Host "✓ Node yokken yol TAM (MSI + npm + profil + dogrulama)"

@@ -2,6 +2,7 @@ import Foundation
 
 /// Sunucudaki kurulum manifesti. Model / token alan adi / Node adresi degisirse
 /// SADECE sunucudaki JSON duzenlenir — yeni surum dagitmaya gerek kalmaz.
+/// `codex.catalogUrl` `{{CODEX_VERSION}}` tasiyabilir (Installer.katalogAdresi doldurur).
 struct Manifest: Codable {
     struct Api: Codable {
         let baseUrl: String

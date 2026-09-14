@@ -5,6 +5,7 @@ namespace YzlabKurucu;
 
 /// Sunucudaki kurulum manifesti. Model / token alan adi / Node adresi degisirse
 /// SADECE sunucudaki JSON duzenlenir — yeni surum dagitmaya gerek kalmaz.
+/// `codex.catalogUrl` `{{CODEX_VERSION}}` tasiyabilir (Kurucu.KatalogAdresi doldurur).
 public sealed partial class Manifest
 {
     public const string Url = "https://yapayzekalab.org/kurulum/codex.json";
@@ -32,6 +33,7 @@ public sealed partial class Manifest
 
     public sealed class CodexInfo
     {
+        [JsonPropertyName("minVersion")] public string MinVersion { get; set; } = "";
         [JsonPropertyName("npmPackage")] public string NpmPackage { get; set; } = "";
         [JsonPropertyName("catalogUrl")] public string CatalogUrl { get; set; } = "";
         [JsonPropertyName("catalogFile")] public string CatalogFile { get; set; } = "";
