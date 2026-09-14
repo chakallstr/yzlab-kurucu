@@ -396,23 +396,36 @@ final class Kurucu: ObservableObject {
 
     // MARK: - Geri al
 
+    /// Geri alma sirasinda yutulan hatalar (sessiz kalmasin).
+    var geriAlHatalari: [String] = []
+
     func geriAl() {
-        for u in [profilYolu, katalogYolu, kisayolYolu] {
-            try? FileManager.default.removeItem(at: u)
+        geriAlHatalari = []
+        let fm = FileManager.default
+        for u in [profilYolu, katalogYolu, kisayolYolu] where fm.fileExists(atPath: u.path) {
+            do { try fm.removeItem(at: u) } catch { geriAlHatalari.append("\(u.lastPathComponent): \(error.localizedDescription)") }
         }
         claudeGeriAl()
-        adim = "Geri alindi. Codex ve Claude Code ayarlarin kurulumdan onceki haline dondu."
+        adim = geriAlHatalari.isEmpty
+            ? "Geri alindi. Codex ve Claude Code ayarlarin kurulumdan onceki haline dondu."
+            : "Geri alma eksik kaldi: " + geriAlHatalari.joined(separator: "; ")
     }
 
     func claudeGeriAl() {
         let fm = FileManager.default
-        if fm.fileExists(atPath: claudeYedekYolu.path) {
-            try? fm.removeItem(at: claudeAyarYolu)
-            try? fm.moveItem(at: claudeYedekYolu, to: claudeAyarYolu)
-        } else if fm.fileExists(atPath: claudeYokIsareti.path) {
-            try? fm.removeItem(at: claudeAyarYolu)
-            try? fm.removeItem(at: claudeYokIsareti)
+        do {
+            if fm.fileExists(atPath: claudeYedekYolu.path) {
+                // Yedegi ONCE yerine yaz, sonra yedegi sil: arada hata olursa dosya kaybolmaz.
+                let veri = try Data(contentsOf: claudeYedekYolu)
+                try veri.write(to: claudeAyarYolu, options: .atomic)
+                try fm.removeItem(at: claudeYedekYolu)
+            } else if fm.fileExists(atPath: claudeYokIsareti.path) {
+                if fm.fileExists(atPath: claudeAyarYolu.path) { try fm.removeItem(at: claudeAyarYolu) }
+                try fm.removeItem(at: claudeYokIsareti)
+            }
+        } catch { geriAlHatalari.append("claude settings: \(error.localizedDescription)") }
+        if fm.fileExists(atPath: claudeKisayolYolu.path) {
+            do { try fm.removeItem(at: claudeKisayolYolu) } catch { geriAlHatalari.append("claude kisayol: \(error.localizedDescription)") }
         }
-        try? fm.removeItem(at: claudeKisayolYolu)
     }
 }

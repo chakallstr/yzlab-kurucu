@@ -21,6 +21,7 @@ enum KomutSatiri {
 
             if argv.contains("--geri-al") {
                 k.geriAl()
+                if !k.geriAlHatalari.isEmpty { print("✗ \(k.adim)"); exit(1) }
                 print("✓ \(k.adim)")
                 exit(0)
             }

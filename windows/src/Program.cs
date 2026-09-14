@@ -40,7 +40,13 @@ internal static class KomutSatiri
 
         if (args.Contains("--geri-al"))
         {
+            Console.WriteLine("claude dizini: " + k.ClaudeDizini);
             k.GeriAl();
+            if (k.GeriAlHatalari.Count > 0)
+            {
+                foreach (var h in k.GeriAlHatalari) Console.WriteLine("✗ " + h);
+                return 1;
+            }
             Console.WriteLine("✓ geri alindi");
             return 0;
         }

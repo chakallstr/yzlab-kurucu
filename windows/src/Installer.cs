@@ -416,14 +416,18 @@ public sealed class Kurucu
         }
     }
 
+    /// Geri alma sirasinda yutulan hatalar (musteriye ve CLI'a gosterilir; sessiz kalmasin).
+    public List<string> GeriAlHatalari { get; } = new();
+
     public void ClaudeGeriAl()
     {
         try
         {
             if (File.Exists(ClaudeYedekYolu))
             {
-                if (File.Exists(ClaudeAyarYolu)) File.Delete(ClaudeAyarYolu);
-                File.Move(ClaudeYedekYolu, ClaudeAyarYolu);
+                // Yedegi ONCE yerine kopyala, sonra yedegi sil: arada hata olursa dosya kaybolmaz.
+                File.Copy(ClaudeYedekYolu, ClaudeAyarYolu, overwrite: true);
+                File.Delete(ClaudeYedekYolu);
             }
             else if (File.Exists(ClaudeYokIsareti))
             {
@@ -431,14 +435,17 @@ public sealed class Kurucu
                 File.Delete(ClaudeYokIsareti);
             }
         }
-        catch { }
-        try { if (File.Exists(ClaudeKisayolYolu)) File.Delete(ClaudeKisayolYolu); } catch { }
+        catch (Exception e) { GeriAlHatalari.Add("claude settings: " + e.Message); }
+        try { if (File.Exists(ClaudeKisayolYolu)) File.Delete(ClaudeKisayolYolu); }
+        catch (Exception e) { GeriAlHatalari.Add("claude kisayol: " + e.Message); }
     }
 
     public void GeriAl()
     {
+        GeriAlHatalari.Clear();
         foreach (var y in new[] { ProfilYolu, KatalogYolu, KisayolYolu })
-            try { if (File.Exists(y)) File.Delete(y); } catch { }
+            try { if (File.Exists(y)) File.Delete(y); }
+            catch (Exception e) { GeriAlHatalari.Add(Path.GetFileName(y) + ": " + e.Message); }
         ClaudeGeriAl();
     }
 

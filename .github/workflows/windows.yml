@@ -147,12 +147,19 @@ jobs:
 
           # --- geri al ---
           $p2 = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--geri-al' -NoNewWindow -Wait -PassThru
+          Write-Host "geri al cikis kodu: $($p2.ExitCode)"
           if ($p2.ExitCode -ne 0)                  { throw "geri al basarisiz" }
           if (Test-Path "$h\yzlab.config.toml")    { throw "geri al profili silmedi" }
           if (Test-Path $lnk)                      { throw "geri al kisayolu silmedi" }
           if (-not (Test-Path "$h\config.toml"))   { throw "geri al config.toml'u SILDI!" }
           if ((Get-Content "$h\config.toml" -Raw) -ne $cfg0) { throw "geri al sonrasi config.toml farkli" }
-          if ((Get-Content "$c\settings.json" -Raw) -ne $settings0) { throw "geri al claude settings.json'u birebir geri koymadi" }
+          $geri = Get-Content "$c\settings.json" -Raw -ErrorAction SilentlyContinue
+          if ($geri -ne $settings0) {
+            Write-Host "--- claude dizini:"; Get-ChildItem -Force $c | Format-Table Name,Length | Out-String | Write-Host
+            Write-Host "--- settings.json simdi:"; Write-Host ($geri -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY')
+            Write-Host "--- beklenen:"; Write-Host $settings0
+            throw "geri al claude settings.json'u birebir geri koymadi"
+          }
           if (Test-Path "$c\settings.json.bak-yzlab") { throw "geri al claude yedegini kaldirmadi" }
           if (Test-Path $lnk2) { throw "geri al claude kisayolunu silmedi" }
           Write-Host "✓ uctan uca TAM (Codex + Claude Code): kur + dogrula + bagimsiz kanit + geri al"

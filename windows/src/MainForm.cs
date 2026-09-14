@@ -123,7 +123,10 @@ public sealed class MainForm : Form
             _k.GeriAl();
             _geriAl.Visible = false;
             _kur.Text = "Kur";
-            Durum("Geri alindi. Codex ve Claude Code ayarlarin kurulumdan onceki haline dondu.", Color.Gray);
+            if (_k.GeriAlHatalari.Count > 0)
+                Durum("⚠ Geri alma eksik kaldi: " + string.Join("; ", _k.GeriAlHatalari), Color.DarkOrange);
+            else
+                Durum("Geri alindi. Codex ve Claude Code ayarlarin kurulumdan onceki haline dondu.", Color.Gray);
         };
         Controls.Add(_geriAl);
 
