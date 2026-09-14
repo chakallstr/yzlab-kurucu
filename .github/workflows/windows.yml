@@ -8,7 +8,9 @@ on:
     paths: ['windows/**']
   workflow_dispatch:
   release:
-    types: [created]
+    # `gh release create` ile dogrudan yayinlanan release'te `created` TETIKLENMEDI (09-15);
+    # `published` guvenilir olan.
+    types: [published, created]
 
 jobs:
   derle-ve-sina:
