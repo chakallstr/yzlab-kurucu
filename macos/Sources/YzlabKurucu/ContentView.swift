@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @StateObject private var kurucu: Kurucu
@@ -48,6 +49,18 @@ struct ContentView: View {
         }
         .padding(26)
         .frame(width: 480, height: 540)
+        .onAppear(perform: panodanAnahtar)
+    }
+
+    /// TEK TIK: panelden anahtari kopyalayip uygulamayi acan musteri hic yapistirmasin —
+    /// panoda `yzk_live_…` varsa alana kendiliginden girer, dogrulama baslar, Kur'a basmak kalir.
+    private func panodanAnahtar() {
+        guard anahtar.isEmpty,
+              let s = NSPasteboard.general.string(forType: .string)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              s.hasPrefix(kurucu.manifest.api.keyPrefix), s.count >= 20, s.count <= 200,
+              !s.contains(" "), !s.contains("\n") else { return }
+        anahtar = s
     }
 
     private var baslik: some View {

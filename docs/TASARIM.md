@@ -1,7 +1,28 @@
-# yzlab Codex Kurucu — Tasarım
+# yzlab Codex + Claude Code Kurucu — Tasarım
 
-Durum: **2026-09-14 · uçtan uca TAM (mac gerçek makine, win CI gerçek anahtar).** Yayın: GitHub Release `v0.1.0`.
-İlk tasarım 2026-09-07; o günkü açık işler aşağıda "Kapanış" bölümünde.
+Durum: **2026-09-15 · Codex + Claude Code uçtan uca TAM (mac gerçek makine + GUI, win CI gerçek anahtar).**
+Yayın: GitHub Release `v0.1.0`. İlk tasarım 2026-09-07; o günkü açık işler "Kapanış" bölümünde.
+
+## Claude Code (2026-09-15 eklendi) — terminal + Claude masaüstü uygulaması
+- **Gateway `/v1/messages` GPT modellerini çeviriyor** (Anthropic sözleşmesi → Codex): canlı 200, araç
+  çağrısı (Read) dahil çalıştı. Claude modelleri ölü olduğundan Claude Code de **Codex modelleriyle** koşar
+  (`ANTHROPIC_MODEL=gpt-5.6-sol`, küçük model `gpt-5.6-luna`). `[claude-code:unrecognized_model]` stderr satırı zararsız.
+- **Profil mekanizması YOK** → tek dosya `~/.claude/settings.json` (veya `CLAUDE_CONFIG_DIR`). Kurucu yalnız `env`
+  bloğunu yazar (`ANTHROPIC_BASE_URL` kök, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`),
+  `ANTHROPIC_API_KEY` kalıntısını siler (AUTH_TOKEN'ı ezerdi), diğer anahtarlar (permissions/hooks/model) korunur.
+  İlk yazımda `settings.json.bak-yzlab` (birebir) ya da `settings.json.yok-yzlab` işareti; **Geri Al birebir geri koyar**;
+  yeniden kurmak yedeği EZMEZ. Bozuk JSON → açık hata, dosyaya dokunulmaz.
+- **Masaüstü uygulaması kanıtı:** `Claude.app` (1.34493.1) app.asar: Code oturumunu Agent SDK ile spawn eder
+  (`pathToClaudeCodeExecutable`, `env:{...process.env}`), Claude Code'un settings/env kodu gömülü (`ANTHROPIC_BASE_URL`,
+  `CLAUDE_CONFIG_DIR` ×52, ".claude/settings" ×35, "point CLAUDE_CONFIG_DIR … via Desktop Settings"). CLI ile ölçüm:
+  `CLAUDE_CODE_OAUTH_TOKEN=sahte` (uygulamanın verdiği OAuth) + settings.json env → istek **bize** gitti (model gpt-5.6-luna);
+  sahte OAuth tek başına → hata. Yani settings.json env, masaüstünün OAuth'unu **yener**.
+  ⚠️ Bu Mac'te Claude.app claude.ai'ye giriş yapmamış (login ekranı) → uygulama içinden tıklama testi yapılamadı;
+  mekanizma CLI + asar ile kanıtlı. Müşteri kurulumdan sonra uygulamayı yeniden açmalı.
+- **Doğrulama izole:** geçici `CLAUDE_CONFIG_DIR` + settings.json kopyası, `claude -p 'Sadece ok yaz' --output-format json`,
+  izolasyon izi `.claude.json`/`projects`. Kabuktaki sahte `ANTHROPIC_API_KEY` settings env'i ezmedi (ölçüldü).
+- Windows: `claude` npm ile kurulur (`@anthropic-ai/claude-code`); "requires git-bash" çıktısı → müşteriye Git for Windows uyarısı.
+- GUI (mac, AX ile sürüldü): anahtar yapıştır → Kur (6 sn) → profil+katalog+settings env+yedek → Geri Al → orijinal birebir.
 
 ## Amaç
 Müşteri anahtarını yapıştırsın, Codex CLI/IDE/masaüstünde yapayzekalab.org üzerinden
@@ -23,7 +44,11 @@ mekanizmasına ihtiyaç yok.
 Codex profil mekaniği (`codex -p <ad>` → `$CODEX_HOME/<ad>.config.toml` taban configin
 ÜSTÜNE katmanlanır; 0.153.4'te `--profile <CONFIG_PROFILE_V2>`) bu tasarımı mümkün kılan şey.
 
-## Manifest — beyin sunucuda
+## Manifest — beyin sunucuda (schemaVersion 2, `claude` bloğu)
+Canlı manifest gömülüden **eski şemaysa** (`schemaVersion` küçük ya da çözülemiyor) kurucu gömülüyü kullanır ve
+"sunucudaki ayar dosyası eski sürüm" der — yeni alanlar (claude) eksik kalmasın diye. Canlıya v2 konana kadar
+dağıtılan kurucu gömülü v2 ile çalışır.
+
 `https://yapayzekalab.org/kurulum/codex.json`
 Kaynak: `~/yzlab-live/apps/web/public/kurulum/codex.json`
 
@@ -64,7 +89,12 @@ Ek: tek "Geri Al" butonu.
 
 ### Doğrulama İZOLE çalışır (2026-09-14)
 `codex exec`, çalıştığı dizin için **config.toml'a `[projects.<dizin>] trust_level="trusted"`
-yazıyor** (0.153.4'te ölçüldü; `--skip-git-repo-check`, `-C`, git-dizini fark etmiyor).
+yazabiliyor** (0.153.4'te ölçüldü; yalnız profil `danger-full-access` iken — read-only sandbox'ta yazmadı).
+İzolasyon KANITI bu yüzden trust'a değil, codex'in her koşulda yazdığı durum dosyalarına bakar
+(`installation_id`, `sessions/`, `*.sqlite`); yoksa "doğrulama izole koşmadı" hatası.
+⚠️ **`CODEX_HOME` komut-önü atama ile verilir** (`CODEX_HOME='…' codex exec …`): `zsh -l` kullanıcının
+`.zshenv/.zprofile`'ındaki `export CODEX_HOME=…`i Process env'inden SONRA uygular ve geçici değeri ezerdi
+(QA 09-14 ZDOTDIR ile kanıtladı; komut-önü atama tüm profil dosyalarından sonra uygulanır).
 "config.toml'a dokunmuyoruz" sözünü bozmamak ve müşterinin MCP sunucularını boşuna
 başlatmamak için doğrulama **geçici bir CODEX_HOME**'da koşar: oraya yalnız profil kopyalanır
 (katalog yolu gerçek dosyaya bakar), `CODEX_HOME=<geçici> codex exec -p yzlab -C <geçici> ok`.
@@ -87,9 +117,9 @@ sahte HOME ile test yapılmaz, CODEX_HOME açıkça verilir.
 ## Komut satırı modları (2026-09-14, iki platform)
 | mod | ne |
 |---|---|
-| `--selftest` | 21 (mac) / 22 (win) invaryant: gömülü manifest, CODEX_HOME, dokunmama, geri al, sürüm ayıklama, katalog adresi |
-| `--kur [--anahtar K] [--model id] [--kisayol 0/1]` | başsız kurulum; anahtar `YZLAB_ANAHTAR` env'den de okunur (loglara düşmesin) |
-| `--geri-al` | kurulumu siler |
+| `--selftest` | 38 (mac) / 39 (win) invaryant: gömülü manifest, CODEX_HOME/CLAUDE_CONFIG_DIR, dokunmama, settings.json birleştirme+yedek, geri al |
+| `--kur [--anahtar K] [--model id] [--kisayol 0/1] [--claude 0/1]` | başsız kurulum; anahtar `YZLAB_ANAHTAR` env'den de okunur (loglara düşmesin) |
+| `--geri-al` | Codex + Claude Code kurulumunu siler / geri koyar |
 Çıkış kodu: 0 başarı · 1 hata · 2 kullanım. Mac: `main.swift` giriş, pencere modu `YzlabKurucuApp.main()`.
 DEBUG derlemede test kancaları: `YZLAB_MANIFEST_URL` (manifest adresi), `YZLAB_LOGIN_PATH`
 (PATH daralt + login-dışı kabuk → "codex yok" yolu test edilebilir). RELEASE'de derlenmez.
@@ -119,6 +149,10 @@ winget yalnız yedek yol. Bu, test edilemeyen en büyük riski tasarımdan siliy
   `client_version=0.154.0` → profil → doğrulama ✓. Node yokken (.pkg + admin şifresi) yolu
   ELLE test edilmedi (bu makinede Node var; yıkıcı).
 - Betikler: scratchpad `e2e-mac.sh` / `e2e-mac-B.sh`.
+
+**macOS Claude Code (09-15):** `e2e-mac-claude.sh`: izole CLAUDE_CONFIG_DIR'da eski settings.json (permissions + ANTHROPIC_API_KEY)
+→ kur → yedek birebir, diğer anahtarlar korundu, API_KEY silindi, env 4 anahtar, 0600 → bağımsız `claude -p` (sahte
+API_KEY kabukta) `ok` / model gpt-5.6-luna → geri al birebir ✓.
 
 **Windows (GitHub Actions, gerçek anahtar `YZLAB_TEST_KEY` secret):**
 - `derle-ve-sina`: selftest 22 kontrol.

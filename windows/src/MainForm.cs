@@ -126,6 +126,23 @@ public sealed class MainForm : Form
             Durum("Geri alindi. Codex ve Claude Code ayarlarin kurulumdan onceki haline dondu.", Color.Gray);
         };
         Controls.Add(_geriAl);
+
+        PanodanAnahtar();
+    }
+
+    /// TEK TIK: panelden anahtari kopyalayip uygulamayi acan musteri hic yapistirmasin —
+    /// panoda `yzk_live_…` varsa alana kendiliginden girer, dogrulama baslar, Kur'a basmak kalir.
+    private void PanodanAnahtar()
+    {
+        try
+        {
+            if (!Clipboard.ContainsText()) return;
+            var s = Clipboard.GetText().Trim();
+            if (s.StartsWith(_m.Api.KeyPrefix) && s.Length >= 20 && s.Length <= 200
+                && !s.Contains(' ') && !s.Contains('\n'))
+                _anahtar.Text = s;   // TextChanged → dogrulama
+        }
+        catch { /* pano erisilemezse sessizce gec */ }
     }
 
     private void Durum(string s, Color c) { _durum.Text = s; _durum.ForeColor = c; }
