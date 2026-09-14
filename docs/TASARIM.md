@@ -194,9 +194,11 @@ elle kontrol et. Console çıktısı bu yolla loga DÜŞÜYOR (PASS/FAIL satırl
 2. ~~macOS kurucu~~ ✅ universal, imzalı, notarize.
 3. ~~macOS notarize~~ ✅.
 4. ~~Windows kurucu~~ ✅ CI'da derlenir + gerçek anahtarla uçtan uca.
-5. ~~`/kurulum` sayfası~~ ✅ `KurucuIndir.tsx` (deploy ayrı onay).
+5. ~~`/kurulum` sayfası~~ ✅ `KurucuIndir.tsx` yazıldı, tsc 0 — **canlıya deploy sahip onayı bekliyor**
+   (runbook: scratchpad `canli-web/DEPLOY-KOMUTLARI.sh`; manifest v2 de aynı runbookta).
 6. ~~Manifest + katalog canlıya~~ ✅ manifest canlı; katalog statikten API'ye geçti.
-7. ~~GitHub Release~~ ✅ `v0.1.0` (indirme adresleri `releases/latest/download/…`).
+7. ~~GitHub Release~~ ✅ `v0.1.0` yayında (dmg + exe, `releases/latest/download/…` 200). ⚠️ `release: created`
+   olayı `gh release create`'te tetiklenmedi → exe ilk sürümde elle yüklendi; workflow `published, created` yapıldı.
 8. ~~Gerçek anahtarla uçtan uca~~ ✅ mac yerel + win CI.
 9. ~~`/v1/balance` tier~~ → GEREKSİZ: 09-10 boyama sonrası GENEL = BALLS = 450k
    (`ballsTierContextWindow` manifestten kaldırıldı). Kademe yeniden ayrışırsa katalog zaten
