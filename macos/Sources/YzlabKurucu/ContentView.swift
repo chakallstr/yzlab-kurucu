@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var kurucu: Kurucu
-    private let manifestCanli: Bool
+    private let kaynak: Manifest.Kaynak
 
     @State private var anahtar = ""
     @State private var model: Manifest.Model
@@ -15,9 +15,9 @@ struct ContentView: View {
         case bos, dogrulaniyor, gecerli(String), kuruluyor(String), bitti, hata(String)
     }
 
-    init(manifest: Manifest, canli: Bool) {
+    init(manifest: Manifest, kaynak: Manifest.Kaynak) {
         _kurucu = StateObject(wrappedValue: Kurucu(manifest: manifest))
-        manifestCanli = canli
+        self.kaynak = kaynak
         let v = manifest.codex.models.first { $0.id == manifest.codex.defaultModel }
             ?? manifest.codex.models[0]
         _model = State(initialValue: v)
@@ -119,9 +119,14 @@ struct ContentView: View {
             Text("Codex: ayri profil dosyasi; config.toml ve auth.json aynen kalir, `codex` eskisi gibi, `codex -p yzlab` bizim uzerimizden calisir. Claude Code: settings.json'da yalniz `env` blogu yazilir, oncesi `.bak-yzlab` olarak saklanir; Geri Al birebir geri koyar.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if !manifestCanli {
+            switch kaynak {
+            case .canli: EmptyView()
+            case .gomuluAgYok:
                 Text("Sunucuya ulasilamadi — gomulu ayarlar kullaniliyor.")
                     .font(.system(size: 11)).foregroundStyle(.orange)
+            case .gomuluEskiSema:
+                Text("Sunucudaki ayar dosyasi eski surum — bu kurucunun gomulu ayarlari kullaniliyor.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
     }

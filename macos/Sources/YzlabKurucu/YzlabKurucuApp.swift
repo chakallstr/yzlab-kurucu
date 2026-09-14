@@ -4,19 +4,19 @@ import SwiftUI
 // oradan `YzlabKurucuApp.main()` ile acilir.
 struct YzlabKurucuApp: App {
     @State private var manifest: Manifest?
-    @State private var canli = false
+    @State private var kaynak: Manifest.Kaynak = .gomuluAgYok
 
     var body: some Scene {
         WindowGroup("YapayZekaLab Codex Kurulumu") {
             Group {
                 if let m = manifest {
-                    ContentView(manifest: m, canli: canli)
+                    ContentView(manifest: m, kaynak: kaynak)
                 } else {
                     ProgressView("Ayarlar aliniyor…")
                         .frame(width: 460, height: 470)
                         .task {
-                            let (m, c) = await Manifest.load()
-                            manifest = m; canli = c
+                            let (m, k) = await Manifest.yukle()
+                            manifest = m; kaynak = k
                         }
                 }
             }

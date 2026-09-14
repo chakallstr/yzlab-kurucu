@@ -73,19 +73,26 @@ struct Manifest: Codable {
         return URL(string: "https://yapayzekalab.org/kurulum/codex.json")!
     }
 
+    /// Manifest nereden geldi? UI'da farkli uyari metni icin.
+    enum Kaynak { case canli, gomuluEskiSema, gomuluAgYok }
+
     /// Once sunucudan cek; ulasilamazsa / eski semaysa gomulu surume dus.
     /// Kurulumun internet kesintisinde de calismasi icin.
     static func load() async -> (Manifest, Bool) {
+        let (m, k) = await yukle()
+        return (m, k == .canli)
+    }
+
+    static func yukle() async -> (Manifest, Kaynak) {
         var req = URLRequest(url: manifestUrl)
         req.timeoutInterval = 10
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        if let (data, resp) = try? await URLSession.shared.data(for: req),
-           (resp as? HTTPURLResponse)?.statusCode == 200,
-           let m = try? JSONDecoder().decode(Manifest.self, from: data),
-           m.schemaVersion >= embedded.schemaVersion {
-            return (m, true)
-        }
-        return (embedded, false)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return (embedded, .gomuluAgYok) }
+        // Eski sema (yeni alanlar yok) → cozulemez ya da surumu kucuk → gomulu.
+        guard let m = try? JSONDecoder().decode(Manifest.self, from: data),
+              m.schemaVersion >= embedded.schemaVersion else { return (embedded, .gomuluEskiSema) }
+        return (m, .canli)
     }
 
     static let embedded: Manifest = {
