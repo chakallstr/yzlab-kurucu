@@ -194,12 +194,17 @@ final class Kurucu: ObservableObject {
 
     /// "codex-cli 0.153.4" → "0.153.4". Codex yoksa/okunamazsa nil.
     nonisolated static func surumAyikla(_ s: String) -> String? {
+        // Once "codex-cli x.y.z" satiri; yoksa ilk x.y.z.
+        if let r = s.range(of: #"codex-cli\s+(\d+\.\d+\.\d+)"#, options: .regularExpression) {
+            let m = String(s[r]); return m.range(of: #"\d+\.\d+\.\d+"#, options: .regularExpression).map { String(m[$0]) }
+        }
         guard let r = s.range(of: #"\d+\.\d+\.\d+"#, options: .regularExpression) else { return nil }
         return String(s[r])
     }
 
     func codexSurumu() -> String? {
-        Kurucu.surumAyikla(Kabuk.calistir("\(Kabuk.komut("codex")) --version", saniye: 20).ciktisi)
+        // Yalniz stdout: login kabugu stderr'e "x.y.z" iceren gurultu basarsa surum sanilmasin.
+        Kurucu.surumAyikla(Kabuk.calistir("\(Kabuk.komut("codex")) --version", saniye: 20, sadeceStdout: true).ciktisi)
     }
 
     /// Manifestteki katalog adresi `{{CODEX_VERSION}}` tasiyabilir: gateway kurulu
@@ -409,19 +414,24 @@ final class Kurucu: ObservableObject {
     /// Geri alma sirasinda yutulan hatalar (sessiz kalmasin).
     var geriAlHatalari: [String] = []
 
-    func geriAl() {
+    /// `kisayollar: false` → yalniz CODEX_HOME/CLAUDE_CONFIG_DIR icindekiler; ~/.local/bin
+    /// kisayollari (HOME'a bagli, izole edilemez) dokunulmaz. --selftest bunu kullanir —
+    /// aksi halde gelistiricinin GERCEK kisayolu silinirdi (QA 09-14 buldu).
+    func geriAl(kisayollar: Bool = true) {
         geriAlHatalari = []
         let fm = FileManager.default
-        for u in [profilYolu, katalogYolu, kisayolYolu] where fm.fileExists(atPath: u.path) {
+        var hedefler = [profilYolu, katalogYolu]
+        if kisayollar { hedefler.append(kisayolYolu) }
+        for u in hedefler where fm.fileExists(atPath: u.path) {
             do { try fm.removeItem(at: u) } catch { geriAlHatalari.append("\(u.lastPathComponent): \(error.localizedDescription)") }
         }
-        claudeGeriAl()
+        claudeGeriAl(kisayol: kisayollar)
         adim = geriAlHatalari.isEmpty
             ? "Geri alindi. Codex ve Claude Code ayarlarin kurulumdan onceki haline dondu."
             : "Geri alma eksik kaldi: " + geriAlHatalari.joined(separator: "; ")
     }
 
-    func claudeGeriAl() {
+    func claudeGeriAl(kisayol: Bool = true) {
         let fm = FileManager.default
         do {
             if fm.fileExists(atPath: claudeYedekYolu.path) {
@@ -434,7 +444,7 @@ final class Kurucu: ObservableObject {
                 try fm.removeItem(at: claudeYokIsareti)
             }
         } catch { geriAlHatalari.append("claude settings: \(error.localizedDescription)") }
-        if fm.fileExists(atPath: claudeKisayolYolu.path) {
+        if kisayol, fm.fileExists(atPath: claudeKisayolYolu.path) {
             do { try fm.removeItem(at: claudeKisayolYolu) } catch { geriAlHatalari.append("claude kisayol: \(error.localizedDescription)") }
         }
     }

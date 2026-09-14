@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 AD="YzlabKurucu"
 GORUNEN="YapayZekaLab Codex Kurulumu"
 BUNDLE_ID="org.yapayzekalab.kurucu"
-SURUM="${SURUM:-0.1.0}"
+SURUM="${SURUM:-0.1.1}"
 IMZA="${IMZA:-Developer ID Application: Ufuk Ince (6VNK7BFS8H)}"
 
 # ⚠️ Xcode exFAT diskte (KIOXIA); SDK'sinda 3.664 AppleDouble ._* dosyasi var ve

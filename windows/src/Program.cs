@@ -126,6 +126,7 @@ internal static class SelfTest
 
         // 3) Surum ayiklama + katalog adresi yer tutucusu
         Kontrol(Kurucu.SurumAyikla("codex-cli 0.153.4") == "0.153.4", "codex surumu ayiklaniyor");
+        Kontrol(Kurucu.SurumAyikla("gurultu 1.2.3\ncodex-cli 0.153.4") == "0.153.4", "gurultu icinde codex-cli satiri tercih edildi");
         Kontrol(Kurucu.SurumAyikla("hicbir sey") is null, "surum yoksa null");
 
         // Sunucu manifesti servis ediyorsa katalogu da ETMEK ZORUNDA -> sert hata.
@@ -182,7 +183,7 @@ internal static class SelfTest
             Kontrol(!profil.Contains(":\\") || profil.Contains(":\\\\"),
                     "katalog yolu TOML icin kacisli");
 
-            k.GeriAl();
+            k.GeriAl(kisayollar: false);
             Kontrol(!File.Exists(k.ProfilYolu), "geri al profili sildi");
             Kontrol(File.Exists(cfg) && File.Exists(auth), "geri al musterinin dosyalarina dokunmadi");
         }
@@ -219,13 +220,13 @@ internal static class SelfTest
             }
             kc.ClaudeAyarYaz("yzk_live_IKINCI", "gpt-5.6-sol");
             Kontrol(File.ReadAllText(kc.ClaudeYedekYolu) == orijinal, "yeniden kurmak yedegi ezmedi");
-            kc.ClaudeGeriAl();
+            kc.ClaudeGeriAl(kisayol: false);
             Kontrol(File.ReadAllText(ayar) == orijinal, "claude geri al orijinali birebir geri koydu");
             Kontrol(!File.Exists(kc.ClaudeYedekYolu), "claude geri al yedegi kaldirdi");
             File.Delete(ayar);
             kc.ClaudeAyarYaz("yzk_live_TESTTESTTESTTEST", "gpt-5.6-luna");
             Kontrol(File.Exists(kc.ClaudeYokIsareti), "claude 'dosya yoktu' isareti");
-            kc.ClaudeGeriAl();
+            kc.ClaudeGeriAl(kisayol: false);
             Kontrol(!File.Exists(ayar), "claude geri al (dosya yoktu) dosyayi sildi");
             File.WriteAllText(ayar, "{bozuk");
             var bozukHata = false;

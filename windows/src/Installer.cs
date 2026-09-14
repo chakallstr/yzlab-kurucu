@@ -215,6 +215,9 @@ public sealed class Kurucu
     /// "codex-cli 0.153.4" → "0.153.4". Yoksa null.
     public static string? SurumAyikla(string s)
     {
+        // Once "codex-cli x.y.z" satiri; yoksa ilk x.y.z (kabuk gurultusu surum sanilmasin).
+        var c = Regex.Match(s ?? "", @"codex-cli\s+(\d+\.\d+\.\d+)");
+        if (c.Success) return c.Groups[1].Value;
         var m = Regex.Match(s ?? "", @"\d+\.\d+\.\d+");
         return m.Success ? m.Value : null;
     }
@@ -428,7 +431,7 @@ public sealed class Kurucu
     /// Geri alma sirasinda yutulan hatalar (musteriye ve CLI'a gosterilir; sessiz kalmasin).
     public List<string> GeriAlHatalari { get; } = new();
 
-    public void ClaudeGeriAl()
+    public void ClaudeGeriAl(bool kisayol = true)
     {
         try
         {
@@ -445,17 +448,22 @@ public sealed class Kurucu
             }
         }
         catch (Exception e) { GeriAlHatalari.Add("claude settings: " + e.Message); }
+        if (!kisayol) return;
         try { if (File.Exists(ClaudeKisayolYolu)) File.Delete(ClaudeKisayolYolu); }
         catch (Exception e) { GeriAlHatalari.Add("claude kisayol: " + e.Message); }
     }
 
-    public void GeriAl()
+    /// `kisayollar: false` → yalniz CODEX_HOME/CLAUDE_CONFIG_DIR icindekiler; masaustu
+    /// kisayollari (profil dizinine bagli, izole edilemez) dokunulmaz. --selftest bunu kullanir.
+    public void GeriAl(bool kisayollar = true)
     {
         GeriAlHatalari.Clear();
-        foreach (var y in new[] { ProfilYolu, KatalogYolu, KisayolYolu })
+        var hedefler = new List<string> { ProfilYolu, KatalogYolu };
+        if (kisayollar) hedefler.Add(KisayolYolu);
+        foreach (var y in hedefler)
             try { if (File.Exists(y)) File.Delete(y); }
             catch (Exception e) { GeriAlHatalari.Add(Path.GetFileName(y) + ": " + e.Message); }
-        ClaudeGeriAl();
+        ClaudeGeriAl(kisayollar);
     }
 
     // ── yardimcilar ────────────────────────────────────────────────────────

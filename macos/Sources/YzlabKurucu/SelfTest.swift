@@ -34,6 +34,7 @@ enum SelfTest {
 
         // 3) Surum ayiklama + katalog adresi yer tutucusu
         kontrol(Kurucu.surumAyikla("codex-cli 0.153.4") == "0.153.4", "codex surumu ayiklaniyor")
+        kontrol(Kurucu.surumAyikla("nvm uyarisi 1.2.3\ncodex-cli 0.153.4") == "0.153.4", "gurultu icinde codex-cli satiri tercih edildi")
         kontrol(Kurucu.surumAyikla("hicbir sey") == nil, "surum yoksa nil")
 
         // 4) Izole bir CODEX_HOME kurup gercek yazma yolunu calistir.
@@ -76,7 +77,7 @@ enum SelfTest {
         let izin = (try? FileManager.default.attributesOfItem(atPath: k.profilYolu.path)[.posixPermissions] as? Int) ?? 0
         kontrol(izin == 0o600, "profil yalniz sahibi okur (0600)")
 
-        k.geriAl()
+        k.geriAl(kisayollar: false)
         kontrol(!FileManager.default.fileExists(atPath: k.profilYolu.path), "geri al profili sildi")
         kontrol(FileManager.default.fileExists(atPath: cfg) && FileManager.default.fileExists(atPath: auth),
                 "geri al musterinin dosyalarina dokunmadi")
@@ -109,14 +110,14 @@ enum SelfTest {
         // Yeniden kur: yedek EZILMEMELI
         try? kc.claudeAyarYaz(anahtar: "yzk_live_IKINCI", modelId: "gpt-5.6-sol")
         kontrol(((try? String(contentsOfFile: kc.claudeYedekYolu.path, encoding: .utf8)) ?? "") == orijinal, "yeniden kurmak yedegi ezmedi")
-        kc.claudeGeriAl()
+        kc.claudeGeriAl(kisayol: false)
         kontrol(((try? String(contentsOfFile: ayar, encoding: .utf8)) ?? "") == orijinal, "claude geri al orijinali birebir geri koydu")
         kontrol(!FileManager.default.fileExists(atPath: kc.claudeYedekYolu.path), "claude geri al yedegi kaldirdi")
         // settings.json HIC YOKKEN kur → geri al dosyayi siler
         try? FileManager.default.removeItem(atPath: ayar)
         try? kc.claudeAyarYaz(anahtar: "yzk_live_TESTTESTTESTTEST", modelId: "gpt-5.6-luna")
         kontrol(FileManager.default.fileExists(atPath: kc.claudeYokIsareti.path), "claude 'dosya yoktu' isareti")
-        kc.claudeGeriAl()
+        kc.claudeGeriAl(kisayol: false)
         kontrol(!FileManager.default.fileExists(atPath: ayar), "claude geri al (dosya yoktu) dosyayi sildi")
         // Bozuk JSON → acik hata, dosyaya dokunma
         try? "{bozuk".write(toFile: ayar, atomically: true, encoding: .utf8)
