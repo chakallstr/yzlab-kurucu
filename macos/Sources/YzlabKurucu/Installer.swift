@@ -35,8 +35,10 @@ final class Kurucu: ObservableObject {
         if let h = ProcessInfo.processInfo.environment["CODEX_HOME"], !h.isEmpty {
             return URL(fileURLWithPath: (h as NSString).expandingTildeInPath)
         }
-        let login = Kabuk.calistir("echo -n \"$CODEX_HOME\"", saniye: 15).ciktisi
-        if !login.isEmpty {
+        // Login kabugundaki CODEX_HOME (GUI uygulamasi kullanicinin .zprofile'ini gormez).
+        // YALNIZ stdout okunur ve deger bir yola benzemeli — kabuk gurultusu yol sanilmasin.
+        let login = Kabuk.calistir("echo -n \"$CODEX_HOME\"", saniye: 15, sadeceStdout: true).ciktisi
+        if !login.isEmpty, !login.contains("\n"), login.hasPrefix("/") || login.hasPrefix("~") {
             return URL(fileURLWithPath: (login as NSString).expandingTildeInPath)
         }
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex")

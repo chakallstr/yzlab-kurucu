@@ -18,10 +18,16 @@ enum Kabuk {
     }()
 
     @discardableResult
-    static func calistir(_ komut: String, saniye: Double = 120, env ekEnv: [String: String] = [:]) -> Sonuc {
+    static func calistir(_ komut: String, saniye: Double = 120, env ekEnv: [String: String] = [:],
+                         sadeceStdout: Bool = false) -> Sonuc {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lc", komut]
+        var loginKabuk = true
+        #if DEBUG
+        // Test kancasi: PATH daraltildiysa /etc/zprofile (path_helper) de devreye girmesin.
+        if ProcessInfo.processInfo.environment["YZLAB_LOGIN_PATH"]?.isEmpty == false { loginKabuk = false }
+        #endif
+        p.arguments = [loginKabuk ? "-lc" : "-c", komut]
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = loginPath + ":" + (env["PATH"] ?? "")
         for (k, v) in ekEnv { env[k] = v }
@@ -33,7 +39,10 @@ enum Kabuk {
 
         let pipe = Pipe()
         p.standardOutput = pipe
-        p.standardError = pipe
+        // Varsayilan: stdout+stderr birlikte (hata mesajlari musteriye gosterilir).
+        // sadeceStdout: kullanicinin login kabugu stderr'e gurultu basarsa (bozuk
+        // .zprofile, nvm uyarisi) DEGER olarak okunmasin diye stderr atilir.
+        p.standardError = sadeceStdout ? FileHandle.nullDevice : pipe
 
         do { try p.run() } catch {
             return Sonuc(cikisKodu: 127, ciktisi: "calistirilamadi: \(error.localizedDescription)")
