@@ -125,6 +125,8 @@ reddediliyordu (09-15'te yakalandı). Artık `yetkiReddiMi`/`YetkiReddiMi`: `Una
    zaman `manifest.claude.smallFastModel` (gpt-5.6-luna) + `model_reasoning_effort=low`:
    `codex exec -m gpt-5.6-luna -c model_reasoning_effort=low` (tırnaksız da geçerli, 3-11 sn),
    `claude -p … --model gpt-5.6-luna` (settings'teki ANTHROPIC_MODEL'i ezer, 11 sn). Mac E2E toplam 25 sn.
+   **Ölçüm (CI, temiz Windows, v0.1.2):** codex npm kurulumu 15 sn · katalog 6 sn · Codex doğrulama 13 sn ·
+   Claude Code npm kurulumu 5 sn · Claude doğrulama 11 sn → **toplam 52 sn** (codex+claude ikisi de yokken).
    Bedel: doğrulama istekleri müşterinin PAKETİNDEN düşer (sahipten değil — 09-15'te UsageRecord ile doğrulandı,
    `coveredByPackageId` dolu, costUsd 0); luna ağırlığı düşük olduğu için astra'ya göre çok daha az hak yer.
 
@@ -211,7 +213,7 @@ elle kontrol et. Console çıktısı bu yolla loga DÜŞÜYOR (PASS/FAIL satırl
 5. ~~`/kurulum` sayfası~~ ✅ CANLI 2026-09-15 (`KurucuIndir.tsx` şeridi, 7 dil; BUILD_ID `F0b_RkJgJWtztr3ZqTW3I`).
    Manifest v2 de canlı (kurucu "manifest: canli (sema v2)" alıyor).
 6. ~~Manifest + katalog canlıya~~ ✅ manifest canlı; katalog statikten API'ye geçti.
-7. ~~GitHub Release~~ ✅ `v0.1.1` yayında (latest; dmg noterli + exe CI'dan). ⚠️ `release: created` olayı
+7. ~~GitHub Release~~ ✅ `v0.1.2` yayında (latest; dmg noterli + exe CI'dan; v0.1.1'in yerine). ⚠️ `release: created` olayı
    `gh release create`'te tetiklenmedi (v0.1.0'da exe elle yüklendi) → workflow `published, created`; v0.1.1'de CI kendisi ekledi.
    Yeni sürüm: `SURUM` (build.sh) + csproj `Version` + manifest `installer.latestVersion` → `NOTARIZE=1 build.sh` → `gh release create vX dmg --latest`.
    ⚠️ e2e betikleri sahibin gerçek `~/.local/bin/yzlab-codex`'ini siler (geri-al HOME'a bakar) — testten sonra geri koy; `--selftest` artık dokunmaz.
