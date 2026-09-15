@@ -75,8 +75,19 @@ jobs:
           YZLAB_ANAHTAR: ${{ secrets.YZLAB_TEST_KEY }}
         run: |
           if (-not $env:YZLAB_ANAHTAR) { Write-Host "::warning::YZLAB_TEST_KEY tanimli degil, ATLANDI"; exit 0 }
-          function Norm($s) { if ($null -eq $s) { return "" }; return ($s -replace "`r`n", "`n").Trim() }
-          function ProjelerSiz($s) { return (Norm ((($s -replace "`r`n", "`n") + "`n") -replace '(?m)^\[projects\.[^\n]*\n(?:(?!\[)[^\n]*\n)*', '')) }
+          # ⚠️ Codex 0.154 config.toml'u yeniden yazarken YORUM ve BOS satirlari siler (olculdu 09-15) →
+          # karsilastirma ANLAMSAL: yorum/bos satir/[projects.*] tablolari haric, siralanmis satirlar.
+          function Anlam($s) {
+            $out = New-Object System.Collections.Generic.List[string]
+            $proj = $false
+            foreach ($l in (($s -replace "`r`n", "`n") -split "`n")) {
+              $t = $l.Trim()
+              if ($t -match '^\[') { $proj = ($t -match '^\[projects\.') }
+              if ($proj -or $t -eq '' -or $t.StartsWith('#')) { continue }
+              $out.Add($t)
+            }
+            return (($out | Sort-Object) -join "`n")
+          }
 
           $h = Join-Path $env:RUNNER_TEMP "codex-home"
           New-Item -ItemType Directory -Force $h | Out-Null
@@ -130,7 +141,7 @@ jobs:
           Write-Host ($out -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY')
           if ($out -notmatch 'provider: yapayzekalab') { throw "codex (profilsiz) bize gitmedi" }
           $cfgExec = [IO.File]::ReadAllText("$h\config.toml")
-          if ((ProjelerSiz $cfgExec) -ne (ProjelerSiz $cfg1)) { Write-Host $cfgExec; throw "config.toml'a [projects] disinda dokunuldu" }
+          if ((Anlam $cfgExec) -ne (Anlam $cfg1)) { Write-Host $cfgExec; throw "config.toml'a [projects] disinda anlamsal degisiklik" }
           Write-Host "codex (profilsiz, ana config): provider yapayzekalab ✓"
 
           # --- bagimsiz kanit: claude (OAuth yok, kabukta sahte API_KEY) ---
@@ -159,7 +170,7 @@ jobs:
           if ($p2.ExitCode -ne 0) { throw "geri al basarisiz" }
           if ([IO.File]::ReadAllText("$h\auth.json") -ne $auth0) { throw "geri al: auth.json geri gelmedi" }
           $cfgSon = [IO.File]::ReadAllText("$h\config.toml")
-          if ((ProjelerSiz $cfgSon) -ne (Norm $cfg0)) { Write-Host $cfgSon; throw "geri al: config.toml onceki hali degil" }
+          if ((Anlam $cfgSon) -ne (Anlam $cfg0)) { Write-Host $cfgSon; throw "geri al: config.toml onceki hali degil" }
           if (Test-Path "$h\yzlab-kurucu-yedek.json") { throw "geri al: yedek json kaldi" }
           if (Test-Path "$h\yzlab-model-catalog.json") { throw "geri al: katalog kaldi" }
           if ([IO.File]::ReadAllText("$c\settings.json") -ne $settings0) { throw "geri al: claude settings.json birebir degil" }

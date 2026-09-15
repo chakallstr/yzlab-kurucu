@@ -93,5 +93,18 @@ internal static class CodexAyarTest
 
         var (k5, _) = CodexAyar.Uygula("[mcp_servers.x]\ncommand = \"y\"\n", sb);
         kontrol(CodexAyar.Dogrula(k5) is null && k5.StartsWith(CodexAyar.UstBas), "toml: tablo ile baslayan dosya");
+
+        // Codex 0.154 (Windows CI'da OLCULDU 09-15) config.toml'u yeniden yazarken YORUMLARI ve bos satirlari siler →
+        // isaretlerimiz kaybolur. Geri al / yeniden kur isarete degil ANAHTAR + TABLO ADINA dayandigi icin calismali.
+        var yeniden = string.Join("\n", CodexAyar.SatirlaraAyir(k1).Satirlar.Where(x => !x.TrimStart().StartsWith("#") && !CodexAyar.BosMu(x)))
+                      + "\n[projects.'/x']\ntrust_level = \"trusted\"\n";
+        kontrol(!yeniden.Contains(CodexAyar.UstBas), "toml: (simulasyon) Codex isaretleri sildi");
+        kontrol(CodexAyar.Dogrula(yeniden) is null, "toml: isaretsiz dosya hala gecerli");
+        var g3 = CodexAyar.GeriAl(yeniden, y1) ?? "";
+        kontrol(!g3.Contains("yzk_live_TEST") && g3.Contains("kendi-modelim") && g3.Contains("http://eski") && g3.Contains("[projects.'/x']"),
+                "toml: isaretler silinse de geri al calisti (anahtar+tablo adiyla)");
+        var (k6, _) = CodexAyar.Uygula(yeniden, sb);
+        kontrol(CodexAyar.Dogrula(k6) is null && Say(k6, "model_provider = \"yapayzekalab\"") == 1,
+                "toml: isaretler silinse de yeniden kur cift kayit uretmedi");
     }
 }

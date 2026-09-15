@@ -108,5 +108,19 @@ enum CodexAyarTest {
         // Ilk satiri tablo olan dosya
         let (k5, _) = CodexAyar.uygula("[mcp_servers.x]\ncommand = \"y\"\n", sb)
         kontrol(CodexAyar.dogrula(k5) == nil && k5.hasPrefix(CodexAyar.ustBas), "toml: tablo ile baslayan dosya")
+
+        // Codex 0.154 (Windows CI'da OLCULDU 09-15) config.toml'u yeniden yazarken YORUMLARI ve bos satirlari siler →
+        // isaretlerimiz kaybolur. Geri al / yeniden kur isarete degil ANAHTAR + TABLO ADINA dayandigi icin calismali.
+        let yeniden = CodexAyar.satirlaraAyir(k1).satirlar
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") && !CodexAyar.bosMu($0) }
+            .joined(separator: "\n") + "\n[projects.'/x']\ntrust_level = \"trusted\"\n"
+        kontrol(!yeniden.contains(CodexAyar.ustBas), "toml: (simulasyon) Codex isaretleri sildi")
+        kontrol(CodexAyar.dogrula(yeniden) == nil, "toml: isaretsiz dosya hala gecerli")
+        let g3 = CodexAyar.geriAl(yeniden, y1) ?? ""
+        kontrol(!g3.contains("yzk_live_TEST") && g3.contains("kendi-modelim") && g3.contains("http://eski") && g3.contains("[projects.'/x']"),
+                "toml: isaretler silinse de geri al calisti (anahtar+tablo adiyla)")
+        let (k6, _) = CodexAyar.uygula(yeniden, sb)
+        kontrol(CodexAyar.dogrula(k6) == nil && say(k6, "model_provider = \"yapayzekalab\"") == 1,
+                "toml: isaretler silinse de yeniden kur cift kayit uretmedi")
     }
 }
