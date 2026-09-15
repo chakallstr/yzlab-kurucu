@@ -40,6 +40,11 @@ public sealed class Kurucu
 
     public bool KuruluMu => File.Exists(ProfilYolu);
 
+    /// Dogrulama testi HER ZAMAN en hizli/ucuz modelle (musterinin sectigi degil): 2026-09-15
+    /// musteride astra ile "ok" 36-61 sn surdu, luna + dusuk efor 11 sn; haktan da az duser.
+    public string DogrulamaModeli => string.IsNullOrWhiteSpace(_m.Claude.SmallFastModel)
+        ? "gpt-5.6-luna" : _m.Claude.SmallFastModel;
+
     /// Claude Code'un karsiligi CLAUDE_CONFIG_DIR. Masaustu uygulamasi (Code sekmesi) da
     /// ayni dizini okur; profil mekanizmasi yok → settings.json'in `env` blogu.
     public string ClaudeDizini
@@ -307,7 +312,7 @@ public sealed class Kurucu
         {
             File.Copy(ProfilYolu, Path.Combine(gecici, _m.Codex.ProfileFile), overwrite: true);
             var r = Calistir("cmd.exe",
-                $"/d /s /c \"codex exec -p {_m.Codex.ProfileName} --skip-git-repo-check -C \"{gecici}\" ok\"",
+                $"/d /s /c \"codex exec -p {_m.Codex.ProfileName} -m {DogrulamaModeli} -c model_reasoning_effort=low --skip-git-repo-check -C \"{gecici}\" ok\"",
                 120_000, new() { ["CODEX_HOME"] = gecici });
             var c = r.Cikti;
             // ⚠️ Duz "401" arama YANLIS POZITIF verir (token sayisi 8,401, sure 3401ms).
@@ -409,7 +414,7 @@ public sealed class Kurucu
         {
             File.Copy(ClaudeAyarYolu, Path.Combine(cfg, _m.Claude.SettingsFile), overwrite: true);
             var r = Calistir("cmd.exe",
-                $"/d /s /c \"{_m.Claude.LaunchCommand} -p \"Sadece ok yaz\" --output-format json\"",
+                $"/d /s /c \"{_m.Claude.LaunchCommand} -p \"Sadece ok yaz\" --model {DogrulamaModeli} --output-format json\"",
                 180_000, new() { ["CLAUDE_CONFIG_DIR"] = cfg }, gecici);
             var c = r.Cikti;
             if (c.Contains("requires git-bash") || c.Contains("Git Bash"))

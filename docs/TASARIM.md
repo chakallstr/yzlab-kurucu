@@ -1,6 +1,6 @@
 # yzlab Codex + Claude Code Kurucu — Tasarım
 
-Durum: **2026-09-15 · Codex + Claude Code uçtan uca TAM (mac gerçek makine + GUI, win CI gerçek anahtar).**
+Durum: **2026-09-15 · Codex + Claude Code uçtan uca TAM (mac gerçek makine + GUI, win CI gerçek anahtar). v0.1.2: arayüz donması + yavaş doğrulama düzeltildi.**
 Yayın: GitHub Release `v0.1.0`. İlk tasarım 2026-09-07; o günkü açık işler "Kapanış" bölümünde.
 
 ## Claude Code (2026-09-15 eklendi) — terminal + Claude masaüstü uygulaması
@@ -113,6 +113,20 @@ Codex/Claude çıktısında `401` alt dizesi aramak, geçici dizin UUID'sinde (`
 (`8.401`) ya da sürede (`3401 ms`) da eşleşiyordu → ~%1 koşuda kurulum "anahtar geçersiz" diye boşuna
 reddediliyordu (09-15'te yakalandı). Artık `yetkiReddiMi`/`YetkiReddiMi`: `Unauthorized`, `authentication_error`,
 `Invalid API key`, `geçersiz` ya da `HTTP/status/code 401` deseni. Selftest'te 5 kontrol.
+
+### ⚠️ Arayüz donmasın + doğrulama HIZLI modelle (v0.1.2, 2026-09-15 müşteri vakası)
+İlk gerçek Windows müşterisi (fordlive49) "Kur'a basınca çok uzun sürüyor, uygulama donuyor" dedi. İki ayrı kök:
+1. **Donma:** `KurAsync` WinForms UI thread'inde koşuyordu; içindeki `npm install` / `codex exec` / `claude -p`
+   senkron bekliyor → pencere "Yanıt vermiyor". Win: `await Task.Run(...)` + `BeginInvoke` ile durum metni.
+   Mac aynı hataya sahipti (`@MainActor` Kurucu içinde senkron `Process` beklemesi): `Kabuk.calistirAsync`
+   (`Task.detached`) ile ana aktör bloklanmaz.
+2. **Yavaşlık:** doğrulama müşterinin SEÇTİĞİ modelle ("ok") yapılıyordu → gpt-6-astra: 1. deneme kuyrukta 33,5 sn
+   bekledi ve 36. sn'de istemci kapattı (`client_closed_request`), 2. deneme 60,5 sn düşündü. Artık doğrulama her
+   zaman `manifest.claude.smallFastModel` (gpt-5.6-luna) + `model_reasoning_effort=low`:
+   `codex exec -m gpt-5.6-luna -c model_reasoning_effort=low` (tırnaksız da geçerli, 3-11 sn),
+   `claude -p … --model gpt-5.6-luna` (settings'teki ANTHROPIC_MODEL'i ezer, 11 sn). Mac E2E toplam 25 sn.
+   Bedel: doğrulama istekleri müşterinin PAKETİNDEN düşer (sahipten değil — 09-15'te UsageRecord ile doğrulandı,
+   `coveredByPackageId` dolu, costUsd 0); luna ağırlığı düşük olduğu için astra'ya göre çok daha az hak yer.
 
 ### ⚠️ stdin KAPALI olmalı
 `codex exec` stdin bir boru/terminal ise "Reading additional input from stdin..." deyip EOF

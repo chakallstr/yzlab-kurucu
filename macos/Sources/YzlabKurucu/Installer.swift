@@ -74,6 +74,11 @@ final class Kurucu: ObservableObject {
         URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".local/bin/yzlab-claude")
     }
 
+    /// Dogrulama testi HER ZAMAN en hizli/ucuz modelle yapilir (musterinin sectigi degil):
+    /// 2026-09-15 Windows musterisinde astra ile "ok" 36-61 sn surdu (kuyruk + 60 sn dusunme),
+    /// luna + dusuk efor 11 sn. Hakkindan da daha az duser (luna agirligi dusuk).
+    var dogrulamaModeli: String { manifest.claude.smallFastModel }
+
     var kuruluMu: Bool { FileManager.default.fileExists(atPath: profilYolu.path) }
     var claudeKuruluMu: Bool {
         FileManager.default.fileExists(atPath: claudeYedekYolu.path)
@@ -122,7 +127,7 @@ final class Kurucu: ObservableObject {
         }
 
         adim = "Codex dogrulaniyor…"
-        try dogrula()
+        try await dogrula()
 
         if claude {
             adim = "Claude Code aranıyor…"
@@ -137,7 +142,7 @@ final class Kurucu: ObservableObject {
             }
 
             adim = "Claude Code dogrulaniyor…"
-            try claudeDogrula()
+            try await claudeDogrula()
         }
 
         adim = "Kuruldu"
@@ -145,15 +150,15 @@ final class Kurucu: ObservableObject {
 
     // MARK: - Node / npm
 
-    private func nodeHazirla() throws {
-        if Kabuk.varMi("npm") { return }
+    private func nodeHazirla() async throws {
+        if await Kabuk.varMiAsync("npm") { return }
         adim = "Node.js kuruluyor… (birkac dakika)"
         let url = manifest.node.macos.url
         let pkg = NSTemporaryDirectory() + "node-yzlab.pkg"
-        let indir = Kabuk.calistir("curl -fsSL -o '\(pkg)' '\(url)'", saniye: 600)
+        let indir = await Kabuk.calistirAsync("curl -fsSL -o '\(pkg)' '\(url)'", saniye: 600)
         guard indir.basarili else { throw KurulumHatasi.codexKurulamadi("Node indirilemedi: \(indir.ciktisi)") }
         // installer root ister: kullaniciya sifre sorulur.
-        let kur = Kabuk.calistir(
+        let kur = await Kabuk.calistirAsync(
             "osascript -e 'do shell script \"installer -pkg \\\"\(pkg)\\\" \(manifest.node.macos.silentArgs)\" with administrator privileges'",
             saniye: 900)
         guard kur.basarili else { throw KurulumHatasi.codexKurulamadi("Node kurulumu reddedildi veya basarisiz") }
@@ -162,8 +167,8 @@ final class Kurucu: ObservableObject {
     /// Ozel npm prefix'i (.npmrc `prefix=~/.npm-global`, nvm) yalniz kullanicinin
     /// interaktif .zshrc'sinde PATH'e eklenir; bizim `zsh -lc` onu okumaz → kurulu
     /// olsa da bulunamazdi. npm'e sorup bin dizinini PATH'imize ekliyoruz.
-    private func npmGlobalBiniPathEkle() {
-        let r = Kabuk.calistir("npm prefix -g", saniye: 30, sadeceStdout: true)
+    private func npmGlobalBiniPathEkle() async {
+        let r = await Kabuk.calistirAsync("npm prefix -g", saniye: 30, sadeceStdout: true)
         guard r.basarili, let prefix = r.ciktisi.split(separator: "\n").last.map(String.init),
               prefix.hasPrefix("/") else { return }
         Kabuk.ekPath = prefix + "/bin"
@@ -172,12 +177,12 @@ final class Kurucu: ObservableObject {
     /// Codex KURULUYSA hic dokunma — boylece musterinin Codex'i acik olsa bile
     /// dosya kilidi/guncelleme sorunu cikmaz, kapatmasi gerekmez.
     private func codexHazirla() async throws {
-        if Kabuk.komutVarMi("codex") { return }
-        try nodeHazirla()
+        if await Kabuk.komutVarMiAsync("codex") { return }
+        try await nodeHazirla()
         adim = "Codex CLI kuruluyor… (birkac dakika)"
-        let r = Kabuk.calistir("npm install -g \(manifest.codex.npmPackage)", saniye: 1200)
-        npmGlobalBiniPathEkle()
-        guard r.basarili, Kabuk.komutVarMi("codex") else {
+        let r = await Kabuk.calistirAsync("npm install -g \(manifest.codex.npmPackage)", saniye: 1200)
+        await npmGlobalBiniPathEkle()
+        guard r.basarili, await Kabuk.komutVarMiAsync("codex") else {
             throw KurulumHatasi.codexKurulamadi(String(r.ciktisi.suffix(300)))
         }
     }
@@ -202,9 +207,9 @@ final class Kurucu: ObservableObject {
         return String(s[r])
     }
 
-    func codexSurumu() -> String? {
+    func codexSurumu() async -> String? {
         // Yalniz stdout: login kabugu stderr'e "x.y.z" iceren gurultu basarsa surum sanilmasin.
-        Kurucu.surumAyikla(Kabuk.calistir("\(Kabuk.komut("codex")) --version", saniye: 20, sadeceStdout: true).ciktisi)
+        Kurucu.surumAyikla(await Kabuk.calistirAsync("\(Kabuk.komut("codex")) --version", saniye: 20, sadeceStdout: true).ciktisi)
     }
 
     /// Manifestteki katalog adresi `{{CODEX_VERSION}}` tasiyabilir: gateway kurulu
@@ -218,7 +223,7 @@ final class Kurucu: ObservableObject {
     }
 
     private func kataloguIndir(anahtar: String) async throws {
-        var req = URLRequest(url: katalogAdresi(surum: codexSurumu()))
+        var req = URLRequest(url: katalogAdresi(surum: await codexSurumu()))
         req.timeoutInterval = 30
         // Anahtarla istenir: gateway musterinin kendi kademesine gore katalog verir.
         req.setValue(manifest.api.authPrefix + anahtar, forHTTPHeaderField: "Authorization")
@@ -274,7 +279,7 @@ final class Kurucu: ObservableObject {
     /// yolu gercek dosyaya bakar). Sebep: `codex exec` calistigi dizin icin config.toml'a
     /// `[projects.*] trust_level` YAZABILIR (0.153'te olculdu) — musterinin config.toml'una
     /// dokunmama sozunu bozmamak ve musterinin MCP sunucularini bosuna baslatmamak icin.
-    private func dogrula() throws {
+    private func dogrula() async throws {
         let gecici = NSTemporaryDirectory() + "yzlab-dogrula-" + UUID().uuidString
         let fm = FileManager.default
         try? fm.createDirectory(atPath: gecici, withIntermediateDirectories: true)
@@ -288,8 +293,8 @@ final class Kurucu: ObservableObject {
         // uygular ve bizim gecici degeri ezerdi (QA 09-14 ZDOTDIR ile kanitladi) →
         // codex exec musterinin GERCEK config.toml'una trust yazardi. Komut-onu atama
         // butun profil dosyalarindan sonra uygulanir; ikisi birden en guvenlisi.
-        let r = Kabuk.calistir(
-            "CODEX_HOME='\(gecici)' \(Kabuk.komut("codex")) exec -p \(manifest.codex.profileName) --skip-git-repo-check -C '\(gecici)' 'ok' 2>&1 | tail -40",
+        let r = await Kabuk.calistirAsync(
+            "CODEX_HOME='\(gecici)' \(Kabuk.komut("codex")) exec -p \(manifest.codex.profileName) -m '\(dogrulamaModeli)' -c 'model_reasoning_effort=\"low\"' --skip-git-repo-check -C '\(gecici)' 'ok' 2>&1 | tail -40",
             saniye: 120, env: ["CODEX_HOME": gecici])
         let c = r.ciktisi
         // ⚠️ Duz "401" arama YANLIS POZITIF verir (token sayisi 8.401, sure 3401ms, oturum id…).
@@ -317,12 +322,12 @@ final class Kurucu: ObservableObject {
     // MARK: - Claude Code (terminal + Claude masaustu uygulamasi)
 
     private func claudeHazirla() async throws {
-        if Kabuk.komutVarMi("claude") { return }
-        try nodeHazirla()
+        if await Kabuk.komutVarMiAsync("claude") { return }
+        try await nodeHazirla()
         adim = "Claude Code kuruluyor… (birkac dakika)"
-        let r = Kabuk.calistir("npm install -g \(manifest.claude.npmPackage)", saniye: 1200)
-        npmGlobalBiniPathEkle()
-        guard r.basarili, Kabuk.komutVarMi("claude") else {
+        let r = await Kabuk.calistirAsync("npm install -g \(manifest.claude.npmPackage)", saniye: 1200)
+        await npmGlobalBiniPathEkle()
+        guard r.basarili, await Kabuk.komutVarMiAsync("claude") else {
             throw KurulumHatasi.claudeKurulamadi(String(r.ciktisi.suffix(300)))
         }
     }
@@ -384,7 +389,7 @@ final class Kurucu: ObservableObject {
     /// settings.json'daki env ile Claude Code'un gercekten BIZE gittigini kanitlar.
     /// IZOLE: gecici CLAUDE_CONFIG_DIR'a yalniz settings.json kopyalanir — musterinin
     /// oturum/proje kayitlarina (.claude.json, projects/) dokunulmaz.
-    private func claudeDogrula() throws {
+    private func claudeDogrula() async throws {
         let gecici = NSTemporaryDirectory() + "yzlab-claude-dogrula-" + UUID().uuidString
         let fm = FileManager.default
         try? fm.createDirectory(atPath: gecici + "/cfg", withIntermediateDirectories: true)
@@ -392,8 +397,8 @@ final class Kurucu: ObservableObject {
         do { try fm.copyItem(at: claudeAyarYolu, to: URL(fileURLWithPath: gecici + "/cfg/" + manifest.claude.settingsFile)) }
         catch { throw KurulumHatasi.yazilamadi("dogrulama kopyasi: \(error.localizedDescription)") }
 
-        let r = Kabuk.calistir(
-            "cd '\(gecici)' && CLAUDE_CONFIG_DIR='\(gecici)/cfg' \(Kabuk.komut("claude")) -p 'Sadece ok yaz' --output-format json 2>&1 | tail -c 4000",
+        let r = await Kabuk.calistirAsync(
+            "cd '\(gecici)' && CLAUDE_CONFIG_DIR='\(gecici)/cfg' \(Kabuk.komut("claude")) -p 'Sadece ok yaz' --model '\(dogrulamaModeli)' --output-format json 2>&1 | tail -c 4000",
             saniye: 180, env: ["CLAUDE_CONFIG_DIR": gecici + "/cfg"])
         let c = r.ciktisi
         if Kurucu.yetkiReddiMi(c) {

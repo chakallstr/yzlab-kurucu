@@ -194,8 +194,15 @@ public sealed class MainForm : Form
         try
         {
             var model = (Manifest.ModelInfo)_model.SelectedItem!;
-            await _k.KurAsync(_anahtar.Text.Trim(), model, _kisayol.Checked,
-                              s => Durum(s, Color.Gray), _claude.Checked);
+            var anahtar = _anahtar.Text.Trim();
+            var kisayol = _kisayol.Checked;
+            var claude = _claude.Checked;
+            // ⚠️ Kurulum ARKA PLAN is parcaciginda: icindeki npm install / codex exec /
+            // claude -p senkron bekler (dakikalar). UI thread'de kossaydi pencere
+            // "yanit vermiyor"a duserdi (musteri 2026-09-15'te tam bunu yasadi).
+            // Durum metni Invoke ile UI'a tasinir.
+            await Task.Run(() => _k.KurAsync(anahtar, model, kisayol,
+                s => { try { BeginInvoke(() => Durum(s, Color.Gray)); } catch { } }, claude));
             Durum(_claude.Checked
                 ? $"✓ Kuruldu. Codex: codex -p {_m.Codex.ProfileName} · Claude Code: claude. Claude masaustu uygulamasini yeniden ac."
                 : $"✓ Kuruldu. Masaustundeki kisayoldan veya codex -p {_m.Codex.ProfileName} ile calistir.", Color.SeaGreen);

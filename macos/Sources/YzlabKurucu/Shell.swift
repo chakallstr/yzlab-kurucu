@@ -88,6 +88,23 @@ enum Kabuk {
                         .trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
     }
 
+    /// Ayni sey, ama ana is parcacigini BLOKLAMADAN (SwiftUI penceresi donmasin;
+    /// npm install dakikalar, codex exec / claude -p 5-20 sn surer).
+    static func calistirAsync(_ komut: String, saniye: Double = 120, env ekEnv: [String: String] = [:],
+                              sadeceStdout: Bool = false) async -> Sonuc {
+        await Task.detached(priority: .userInitiated) {
+            calistir(komut, saniye: saniye, env: ekEnv, sadeceStdout: sadeceStdout)
+        }.value
+    }
+
+    static func varMiAsync(_ komut: String) async -> Bool {
+        await Task.detached { varMi(komut) }.value
+    }
+
+    static func komutVarMiAsync(_ ad: String) async -> Bool {
+        await Task.detached { komutVarMi(ad) }.value
+    }
+
     static func varMi(_ komut: String) -> Bool {
         calistir("command -v \(komut) >/dev/null 2>&1", saniye: 15).basarili
     }
