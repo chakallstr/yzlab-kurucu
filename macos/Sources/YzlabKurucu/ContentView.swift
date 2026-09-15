@@ -7,10 +7,11 @@ struct ContentView: View {
 
     @State private var anahtar = ""
     @State private var model: Manifest.Model
-    @State private var kisayol = true
-    @State private var claude = true
+    @State private var anahtarGiris = false
+    @State private var claude = false
     @State private var durum: Durum = .bos
     @State private var dogrulamaGorevi: Task<Void, Never>?
+    @State private var kurulu = false
 
     enum Durum: Equatable {
         case bos, dogrulaniyor, gecerli(String), kuruluyor(String), bitti, hata(String)
@@ -32,28 +33,25 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             baslik
             anahtarAlani
             modelAlani
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle("Claude Code'u da bagla (terminal + Claude masaustu uygulamasi)", isOn: $claude)
-                    .disabled(mesgul)
-                Toggle("Terminal kisayollari ekle (yzlab-codex, yzlab-claude)", isOn: $kisayol)
-                    .disabled(mesgul)
-            }
+            secenekler
             Divider()
             guvence
             Spacer(minLength: 0)
             altBar
         }
         .padding(26)
-        .frame(width: 480, height: 540)
-        .onAppear(perform: panodanAnahtar)
+        .frame(width: 480, height: 580)
+        .onAppear {
+            kurulu = kurucu.kuruluMu || kurucu.claudeKuruluMu
+            panodanAnahtar()
+        }
     }
 
-    /// TEK TIK: panelden anahtari kopyalayip uygulamayi acan musteri hic yapistirmasin —
-    /// panoda `yzk_live_…` varsa alana kendiliginden girer, dogrulama baslar, Kur'a basmak kalir.
+    /// TEK TIK: panoda `yzk_live_…` varsa alana kendiliginden girer.
     private func panodanAnahtar() {
         guard anahtar.isEmpty,
               let s = NSPasteboard.general.string(forType: .string)?
@@ -66,7 +64,7 @@ struct ContentView: View {
     private var baslik: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("YapayZekaLab").font(.system(size: 21, weight: .semibold))
-            Text("Codex + Claude Code Kurulumu").font(.system(size: 14)).foregroundStyle(.secondary)
+            Text("Codex masaustu kurulumu").font(.system(size: 14)).foregroundStyle(.secondary)
         }
     }
 
@@ -76,7 +74,6 @@ struct ContentView: View {
             SecureField(kurucu.manifest.api.keyPrefix + "…", text: $anahtar)
                 .textFieldStyle(.roundedBorder)
                 .disabled(mesgul)
-                // macOS 13 (Ventura) destegi: yeni iki-parametreli onChange 14+ ister.
                 .onChange(of: anahtar) { yeni in anahtarDegisti(yeni) }
             durumSatiri
         }
@@ -97,8 +94,8 @@ struct ContentView: View {
             Label(a, systemImage: "gearshape").font(.system(size: 11)).foregroundStyle(.secondary)
         case .bitti:
             Label(claude
-                  ? "Kuruldu. Yeni terminal: `codex -p yzlab` ve `claude`. Claude masaustu uygulamasini yeniden ac."
-                  : "Kuruldu. Yeni bir terminal ac ve `codex -p yzlab` yaz.",
+                  ? "Kuruldu. Codex'i ac ve yaz. Claude Code: yeni terminalde `claude`."
+                  : "Kuruldu. Codex'i ac ve yaz — istekler YapayZekaLab'dan gecer.",
                   systemImage: "checkmark.seal.fill")
                 .font(.system(size: 11)).foregroundStyle(.green)
                 .fixedSize(horizontal: false, vertical: true)
@@ -119,9 +116,20 @@ struct ContentView: View {
             }
             .labelsHidden()
             .disabled(mesgul)
-            Text("Sonradan degistirebilirsin: \(kurucu.manifest.codex.profileFile) `model` satiri; Claude Code icin settings.json `ANTHROPIC_MODEL`.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var secenekler: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("ChatGPT hesabim yerine yalniz anahtarla gir", isOn: $anahtarGiris)
+                    .disabled(mesgul)
+                Text("Codex'te hala \"hakkiniz yok / usage limit\" cikiyorsa isaretle. Geri Al hesabini geri getirir.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Toggle("Claude Code'u da bagla (terminal + Claude masaustu)", isOn: $claude)
+                .disabled(mesgul)
         }
     }
 
@@ -129,7 +137,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 5) {
             Label("Mevcut ayarlarin korunur", systemImage: "lock.shield")
                 .font(.system(size: 12, weight: .medium))
-            Text("Codex: ayri profil dosyasi; config.toml ve auth.json aynen kalir, `codex` eskisi gibi, `codex -p yzlab` bizim uzerimizden calisir. Claude Code: settings.json'da yalniz `env` blogu yazilir, oncesi `.bak-yzlab` olarak saklanir; Geri Al birebir geri koyar.")
+            Text("Codex'in config.toml dosyasina isaretli bir blok eklenir, onceki hali saklanir. ChatGPT girisin durur. Codex aciksa kapatilip kurulumdan sonra yeniden acilir. Geri Al her seyi birebir geri koyar.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             switch kaynak {
@@ -146,13 +154,17 @@ struct ContentView: View {
 
     private var altBar: some View {
         HStack {
-            if kurucu.kuruluMu || kurucu.claudeKuruluMu {
-                Button("Geri Al") { kurucu.geriAl(); durum = .hata(kurucu.adim) }
-                    .disabled(mesgul)
+            if kurulu {
+                Button("Geri Al") {
+                    kurucu.geriAl()
+                    kurulu = kurucu.kuruluMu || kurucu.claudeKuruluMu
+                    durum = .hata(kurucu.adim)
+                }
+                .disabled(mesgul)
             }
             Spacer()
             if mesgul { ProgressView().controlSize(.small).padding(.trailing, 6) }
-            Button(kurucu.kuruluMu ? "Yeniden Kur" : "Kur") { kurulumuBaslat() }
+            Button(kurulu ? "Yeniden Kur" : "Kur") { kurulumuBaslat() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!anahtarGecerli || mesgul)
         }
@@ -166,7 +178,6 @@ struct ContentView: View {
         guard temiz.count >= 20 else { durum = .bos; return }
         durum = .dogrulaniyor
         dogrulamaGorevi = Task {
-            // Yapistirma sirasinda her karakterde istek atmamak icin kisa bekleme.
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             do {
@@ -180,19 +191,32 @@ struct ContentView: View {
 
     private func kurulumuBaslat() {
         let temiz = anahtar.trimmingCharacters(in: .whitespacesAndNewlines)
+        var kapatIzni = false
+        if !Kurucu.acikCodexUygulamalari().isEmpty {
+            let a = NSAlert()
+            a.messageText = "Codex acik"
+            a.informativeText = "Ayarin gecmesi icin Codex kapatilacak ve kurulum bitince yeniden acilacak."
+            a.addButton(withTitle: "Kapat ve kur")
+            a.addButton(withTitle: "Vazgec")
+            guard a.runModal() == .alertFirstButtonReturn else { return }
+            kapatIzni = true
+        }
         Task {
             do {
                 durum = .kuruluyor("Basliyor…")
                 let izle = Task { @MainActor in
-                    while kurucu.calisiyor {
-                        durum = .kuruluyor(kurucu.adim)
+                    while kurucu.calisiyor || durum == .kuruluyor("Basliyor…") {
+                        if kurucu.calisiyor { durum = .kuruluyor(kurucu.adim) }
                         try? await Task.sleep(nanoseconds: 200_000_000)
                     }
                 }
-                try await kurucu.kur(anahtar: temiz, model: model, kisayol: kisayol, claude: claude)
+                try await kurucu.kur(anahtar: temiz, model: model, claude: claude,
+                                     anahtarGiris: anahtarGiris, codexKapatIzni: kapatIzni)
                 izle.cancel()
+                kurulu = true
                 durum = .bitti
             } catch {
+                kurulu = kurucu.kuruluMu || kurucu.claudeKuruluMu
                 durum = .hata(error.localizedDescription)
             }
         }

@@ -11,13 +11,21 @@ public sealed class KurulumHatasi : Exception
     public KurulumHatasi(string mesaj) : base(mesaj) { }
 }
 
+/// Kurulumun beyni. v0.2 (2026-09-15) — HEDEF CODEX MASAUSTU (macOS Installer.swift ile birebir):
+/// - Ayar ana config.toml'a isaretli bloklarla yazilir (CodexAyar). Profil YAZILMAZ — masaustu okumuyordu.
+/// - Node / Codex CLI KURULMAZ. Dogrulama dogrudan HTTPS, Codex bicimiyle.
+/// - Varsayilan ChatGPT girisi DURUR; `anahtarGiris` → auth.json anahtar modu (yedekli).
+/// - Codex aciksa izinle kapatilir, kurulumdan sonra yeniden acilir.
 public sealed class Kurucu
 {
     private readonly Manifest _m;
     public Kurucu(Manifest m) { _m = m; }
 
-    /// CODEX_HOME tanimliysa Codex config'i ORADAN okur; %USERPROFILE%\.codex'e
-    /// yazmak sessizce hicbir sey yapmaz ve hata da vermez.
+    public List<string> GeriAlHatalari { get; } = new();
+
+    // ── Dizinler ───────────────────────────────────────────────────────────
+
+    /// CODEX_HOME tanimliysa Codex config'i ORADAN okur.
     public string CodexDizini
     {
         get
@@ -27,26 +35,22 @@ public sealed class Kurucu
                 h = Environment.GetEnvironmentVariable("CODEX_HOME", EnvironmentVariableTarget.User);
             if (!string.IsNullOrWhiteSpace(h))
                 return Environment.ExpandEnvironmentVariables(h.Trim());
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
         }
     }
 
-    public string ProfilYolu => Path.Combine(CodexDizini, _m.Codex.ProfileFile);
+    public string AyarYolu => Path.Combine(CodexDizini, "config.toml");
+    public string YedekYolu => Path.Combine(CodexDizini, "yzlab-kurucu-yedek.json");
+    public string AyarAnlikYedekYolu => Path.Combine(CodexDizini, "config.toml.bak-yzlab");
+    public string AuthYolu => Path.Combine(CodexDizini, "auth.json");
+    public string AuthYedekYolu => Path.Combine(CodexDizini, "auth.json.bak-yzlab");
+    public string AuthYokIsareti => Path.Combine(CodexDizini, "auth.json.yok-yzlab");
     public string KatalogYolu => Path.Combine(CodexDizini, _m.Codex.CatalogFile);
-    public string KisayolYolu => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-        "Codex (YapayZekaLab).lnk");
+    /// v0.1.x kalintilari: profil dosyasi + `codex -p yzlab` masaustu kisayolu (artik calismaz).
+    public string EskiProfilYolu => Path.Combine(CodexDizini, _m.Codex.ProfileFile);
+    public string EskiKisayolYolu => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Codex (YapayZekaLab).lnk");
 
-    public bool KuruluMu => File.Exists(ProfilYolu);
-
-    /// Dogrulama testi HER ZAMAN en hizli/ucuz modelle (musterinin sectigi degil): 2026-09-15
-    /// musteride astra ile "ok" 36-61 sn surdu, luna + dusuk efor 11 sn; haktan da az duser.
-    public string DogrulamaModeli => string.IsNullOrWhiteSpace(_m.Claude.SmallFastModel)
-        ? "gpt-5.6-luna" : _m.Claude.SmallFastModel;
-
-    /// Claude Code'un karsiligi CLAUDE_CONFIG_DIR. Masaustu uygulamasi (Code sekmesi) da
-    /// ayni dizini okur; profil mekanizmasi yok → settings.json'in `env` blogu.
     public string ClaudeDizini
     {
         get
@@ -56,19 +60,22 @@ public sealed class Kurucu
                 h = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR", EnvironmentVariableTarget.User);
             if (!string.IsNullOrWhiteSpace(h))
                 return Environment.ExpandEnvironmentVariables(h.Trim());
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _m.Claude.ConfigDir);
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _m.Claude.ConfigDir);
         }
     }
     public string ClaudeAyarYolu => Path.Combine(ClaudeDizini, _m.Claude.SettingsFile);
-    /// Ilk yazimdan onceki settings.json — Geri Al bunu birebir geri koyar.
     public string ClaudeYedekYolu => ClaudeAyarYolu + ".bak-yzlab";
-    /// Ilk yazimda settings.json HIC YOKTU isareti — Geri Al dosyayi siler.
     public string ClaudeYokIsareti => ClaudeAyarYolu + ".yok-yzlab";
     public string ClaudeKisayolYolu => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-        "Claude Code (YapayZekaLab).lnk");
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Claude Code (YapayZekaLab).lnk");
+
+    public bool KuruluMu => File.Exists(YedekYolu) || File.Exists(EskiProfilYolu)
+                            || File.Exists(AuthYedekYolu) || File.Exists(AuthYokIsareti);
     public bool ClaudeKuruluMu => File.Exists(ClaudeYedekYolu) || File.Exists(ClaudeYokIsareti);
+
+    /// Dogrulama HER ZAMAN en hizli/ucuz modelle (2026-09-15: astra ile "ok" 36-61 sn surdu).
+    public string DogrulamaModeli => string.IsNullOrWhiteSpace(_m.Claude.SmallFastModel)
+        ? "gpt-5.6-luna" : _m.Claude.SmallFastModel;
 
     // ── 1. Anahtar dogrulama ───────────────────────────────────────────────
 
@@ -98,159 +105,158 @@ public sealed class Kurucu
         return "—";
     }
 
-    // ── 2..5 tam kurulum ───────────────────────────────────────────────────
+    // ── 2. Tam kurulum ─────────────────────────────────────────────────────
 
-    public async Task KurAsync(string anahtar, Manifest.ModelInfo model, bool kisayol,
-                               Action<string> bildir, bool claude = true)
+    public async Task KurAsync(string anahtar, Manifest.ModelInfo model, Action<string> bildir,
+                               bool claude = false, bool anahtarGiris = false, bool codexKapatIzni = false)
     {
         bildir("Anahtar dogrulaniyor…");
         await AnahtariDogrulaAsync(anahtar);
 
-        bildir("Codex aranıyor…");
-        await CodexHazirlaAsync(bildir);
-
-        bildir("Model katalogu indiriliyor…");
-        await KataloguIndirAsync(anahtar);
-
-        bildir("Profil yaziliyor…");
-        ProfiliYaz(anahtar, model);
-
-        if (kisayol)
+        bildir("Codex uygulamasi kontrol ediliyor…");
+        var yenidenAc = new List<string>();
+        if (AcikCodexUygulamalari().Count > 0)
         {
-            bildir("Kisayol olusturuluyor…");
-            KisayolYaz();
+            if (!codexKapatIzni) throw new KurulumHatasi("Codex uygulamasi acik. Kapatip tekrar Kur'a bas.");
+            bildir("Codex kapatiliyor…");
+            yenidenAc = await CodexUygulamasiniKapatAsync();
         }
 
-        bildir("Codex dogrulaniyor…");
-        Dogrula();
-
-        if (claude)
+        try
         {
-            bildir("Claude Code aranıyor…");
-            await ClaudeHazirlaAsync(bildir);
+            bildir("Model katalogu indiriliyor…");
+            var surum = await CodexSurumuBulAsync();
+            await KataloguIndirAsync(anahtar, surum);
 
-            bildir("Claude Code ayari yaziliyor…");
-            ClaudeAyarYaz(anahtar, model.Id);
+            bildir("Codex ayari yaziliyor…");
+            CodexAyariYaz(anahtar, model, anahtarGiris);
 
-            if (kisayol)
+            bildir("Baglanti test ediliyor…");
+            await BaglantiyiDogrulaAsync(anahtar, model.Id);
+
+            if (claude)
             {
+                bildir("Claude Code aranıyor…");
+                await ClaudeHazirlaAsync(bildir);
+                bildir("Claude Code ayari yaziliyor…");
+                ClaudeAyarYaz(anahtar, model.Id);
                 bildir("Claude Code kisayolu…");
                 ClaudeKisayolYaz();
+                bildir("Claude Code dogrulaniyor…");
+                ClaudeDogrula();
             }
-
-            bildir("Claude Code dogrulaniyor…");
-            ClaudeDogrula();
         }
-    }
-
-    /// Codex KURULUYSA hic dokunma. Boylece musterinin Codex'i acikken de kurulum
-    /// yapilabilir: Windows'ta calisan codex.exe npm guncellemesini EBUSY ile kilitler.
-    private async Task NodeHazirlaAsync(Action<string> bildir)
-    {
-        if (KomutVar("npm")) return;
-        bildir("Node.js kuruluyor… (birkac dakika)");
-        await NodeKurAsync();
-    }
-
-    private async Task CodexHazirlaAsync(Action<string> bildir)
-    {
-        if (KomutVar("codex")) return;
-        await NodeHazirlaAsync(bildir);
-
-        bildir("Codex CLI kuruluyor… (birkac dakika)");
-        var r = Calistir("cmd.exe", $"/d /s /c \"npm install -g {_m.Codex.NpmPackage}\"", 1_200_000);
-        NpmGlobalBiniPathEkle();
-        if (!KomutVar("codex"))
-            throw new KurulumHatasi("Codex kurulamadi: " + Kisalt(r.Cikti));
-    }
-
-    /// npm'in global bin dizini (Windows'ta prefix'in kendisi: %APPDATA%\npm) yeni kurulan
-    /// Node'da/ozel prefix'te surecimizin PATH'inde OLMAYABILIR (CI'da olculdu: "added 2
-    /// packages" ama `where codex` bos). npm'e sorup PATH'in basina ekliyoruz; boylece hem
-    /// `where codex` hem dogrulamadaki `codex exec` bulur. Kisayol/terminal zaten kayit
-    /// defterindeki PATH'i kullanir.
-    private static void NpmGlobalBiniPathEkle()
-    {
-        var r = Calistir("cmd.exe", "/d /s /c \"npm prefix -g\"", 30_000);
-        var prefix = r.Cikti.Split('\n').Select(x => x.Trim()).LastOrDefault(x => x.Length > 0);
-        if (r.Kod != 0 || string.IsNullOrEmpty(prefix) || !Directory.Exists(prefix)) return;
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        if (!path.Split(';').Any(x => string.Equals(x.TrimEnd('\\'), prefix.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)))
-            Environment.SetEnvironmentVariable("PATH", prefix + ";" + path);
-    }
-
-    /// ⚠️ winget KULLANMIYORUZ: Windows Server'da hic yok, Win10'da surum surum
-    /// degisiyor ve test imkanimiz en zayif oldugu yer orasi. Dogrudan MSI.
-    private async Task NodeKurAsync()
-    {
-        var msi = Path.Combine(Path.GetTempPath(), "node-yzlab.msi");
-        using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+        catch
         {
-            var bytes = await http.GetByteArrayAsync(_m.Node.Windows.Url);
-            await File.WriteAllBytesAsync(msi, bytes);
+            CodexUygulamasiniAc(yenidenAc);
+            throw;
         }
 
-        // msiexec yonetici hakki ister → UAC istemi cikar (runas).
-        var psi = new ProcessStartInfo("msiexec.exe",
-            $"/i \"{msi}\" {_m.Node.Windows.SilentArgs}")
-        { UseShellExecute = true, Verb = "runas" };
-
-        using var p = Process.Start(psi)
-            ?? throw new KurulumHatasi("Node kurulumu baslatilamadi.");
-        await p.WaitForExitAsync();
-        if (p.ExitCode != 0)
-            throw new KurulumHatasi("Node kurulumu reddedildi veya basarisiz (kod " + p.ExitCode + ").");
-
-        // MSI PATH'i degistirir ama bizim surecimiz eski PATH'i tasiyor — tazele.
-        var makine = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? "";
-        var kullanici = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? "";
-        Environment.SetEnvironmentVariable("PATH", makine + ";" + kullanici);
+        if (yenidenAc.Count > 0)
+        {
+            bildir("Codex yeniden aciliyor…");
+            CodexUygulamasiniAc(yenidenAc);
+        }
     }
 
-    // ── Katalog (canli API'den, kurulu Codex surumune gore) ───────────────
+    // ── Codex masaustu uygulamasi (acik mi / kapat / ac) ───────────────────
 
-    /// Codex/Claude ciktisinda GERCEK yetki reddi var mi? Sayilarin icindeki "401"e kanmaz.
-    public static bool YetkiReddiMi(string c)
+    public static readonly string[] MasaustuSurecAdlari = { "Codex", "ChatGPT" };
+
+    /// Yalniz PENCERESI olan surecler: ayni adli `codex` CLI oturumlari (konsol) dokunulmaz.
+    public static List<Process> AcikCodexUygulamalari()
     {
-        if (c.Contains("Unauthorized") || c.Contains("authentication_error") || c.Contains("Invalid API key")
-            || c.Contains("invalid_api_key") || c.Contains("gecersiz") || c.Contains("geçersiz")) return true;
-        return Regex.IsMatch(c, @"(?i)(http|status|code)\D{0,4}401(\D|$)");
+        var l = new List<Process>();
+        foreach (var ad in MasaustuSurecAdlari)
+            foreach (var p in Process.GetProcessesByName(ad))
+                try { if (p.MainWindowHandle != IntPtr.Zero) l.Add(p); } catch { }
+        return l;
     }
 
-    /// "codex-cli 0.153.4" → "0.153.4". Yoksa null.
+    public async Task<List<string>> CodexUygulamasiniKapatAsync()
+    {
+        var yollar = new List<string>();
+        foreach (var p in AcikCodexUygulamalari())
+        {
+            try { var f = p.MainModule?.FileName; if (!string.IsNullOrEmpty(f) && !yollar.Contains(f)) yollar.Add(f); } catch { }
+            try { p.CloseMainWindow(); } catch { }
+        }
+        for (var i = 0; i < 20; i++)
+        {
+            if (AyniYoldakiSurecler(yollar).Count == 0 && AcikCodexUygulamalari().Count == 0) return yollar;
+            await Task.Delay(500);
+        }
+        // Electron uygulamasi tepsiye kucelip arka planda kalabilir (config.toml'u sonra ezer):
+        // kullanici "Kapat ve kur" dedigi icin ayni yoldaki surecleri sonlandir.
+        foreach (var p in AyniYoldakiSurecler(yollar).Concat(AcikCodexUygulamalari()))
+            try { p.Kill(true); } catch { }
+        for (var i = 0; i < 20; i++)
+        {
+            if (AyniYoldakiSurecler(yollar).Count == 0 && AcikCodexUygulamalari().Count == 0) return yollar;
+            await Task.Delay(500);
+        }
+        throw new KurulumHatasi("Codex kapanmadi. Elle kapatip tekrar Kur'a bas.");
+    }
+
+    private static List<Process> AyniYoldakiSurecler(List<string> yollar)
+    {
+        var l = new List<Process>();
+        if (yollar.Count == 0) return l;
+        foreach (var ad in MasaustuSurecAdlari)
+            foreach (var p in Process.GetProcessesByName(ad))
+                try { var f = p.MainModule?.FileName; if (f is not null && yollar.Contains(f)) l.Add(p); } catch { }
+        return l;
+    }
+
+    public static void CodexUygulamasiniAc(List<string> yollar)
+    {
+        foreach (var y in yollar)
+            try { Process.Start(new ProcessStartInfo(y) { UseShellExecute = true }); } catch { }
+    }
+
+    // ── Katalog ────────────────────────────────────────────────────────────
+
+    /// "codex-cli 0.153.4" → "0.153.4". Once "codex-cli x.y.z" satiri; yoksa ilk x.y.z.
     public static string? SurumAyikla(string s)
     {
-        // Once "codex-cli x.y.z" satiri; yoksa ilk x.y.z (kabuk gurultusu surum sanilmasin).
         var c = Regex.Match(s ?? "", @"codex-cli\s+(\d+\.\d+\.\d+)");
         if (c.Success) return c.Groups[1].Value;
         var m = Regex.Match(s ?? "", @"\d+\.\d+\.\d+");
         return m.Success ? m.Value : null;
     }
 
-    public string? CodexSurumu() =>
-        SurumAyikla(Calistir("cmd.exe", "/d /s /c \"codex --version\"", 20_000).Cikti);
+    /// Masaustu kendi codex'ini tasir: npm'deki son surum; ulasilamazsa manifestteki minimum.
+    public async Task<string> CodexSurumuBulAsync()
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var js = await http.GetStringAsync("https://registry.npmjs.org/@openai/codex/latest");
+            using var doc = JsonDocument.Parse(js);
+            var v = SurumAyikla(doc.RootElement.GetProperty("version").GetString() ?? "");
+            if (v is not null) return v;
+        }
+        catch { }
+        return _m.Codex.MinVersion;
+    }
 
-    /// Manifestteki katalog adresi `{{CODEX_VERSION}}` tasiyabilir: gateway kurulu
-    /// Codex surumune gore dogru semayi doner. Surum bulunamazsa minimum surum yazilir.
     public string KatalogAdresi(string? surum)
     {
         var v = string.IsNullOrEmpty(surum) ? _m.Codex.MinVersion : surum;
         return _m.Codex.CatalogUrl.Replace("{{CODEX_VERSION}}", Uri.EscapeDataString(v ?? ""));
     }
 
-    private async Task KataloguIndirAsync(string anahtar)
+    private async Task KataloguIndirAsync(string anahtar, string surum)
     {
         string json;
         using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) })
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, KatalogAdresi(CodexSurumu()));
-            // Anahtarla istenir: gateway musterinin kendi kademesine gore katalog verir.
+            using var req = new HttpRequestMessage(HttpMethod.Get, KatalogAdresi(surum));
             req.Headers.TryAddWithoutValidation("Authorization", _m.Api.AuthPrefix + anahtar);
             try
             {
                 var resp = await http.SendAsync(req);
-                if (!resp.IsSuccessStatusCode)
-                    throw new Exception($"HTTP {(int)resp.StatusCode}");
+                if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {(int)resp.StatusCode}");
                 json = await resp.Content.ReadAsStringAsync();
             }
             catch (Exception e) { throw new KurulumHatasi("Model katalogu indirilemedi: " + e.Message); }
@@ -264,76 +270,256 @@ public sealed class Kurucu
         catch { throw new KurulumHatasi("Model katalogu bozuk indi — tekrar dene."); }
 
         Directory.CreateDirectory(CodexDizini);
-        File.WriteAllText(KatalogYolu, json, new UTF8Encoding(false));
+        AtomikYaz(KatalogYolu, json);
     }
 
-    /// SADECE kendi dosyamizi yazar. config.toml ve auth.json'a DOKUNMAZ →
-    /// musterinin ChatGPT Plus oturumu bozulmaz.
-    private void ProfiliYaz(string anahtar, Manifest.ModelInfo model)
+    // ── config.toml + auth.json ────────────────────────────────────────────
+
+    public static string TomlKacis(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+    private static void AtomikYaz(string yol, string metin)
     {
-        var icerik = _m.Codex.ProfileTemplate
+        var tmp = yol + ".yzlab-tmp";
+        File.WriteAllText(tmp, metin, new UTF8Encoding(false));
+        File.Move(tmp, yol, overwrite: true);
+    }
+
+    public CodexAyar.Sablon Sablon(string anahtar, Manifest.ModelInfo model, bool anahtarGiris)
+    {
+        var dolu = _m.Codex.ProfileTemplate
             .Replace("{{MODEL}}", model.Id)
             .Replace("{{CONTEXT}}", model.ContextWindow.ToString())
             .Replace("{{BASE_URL}}", _m.Api.BaseUrl)
-            .Replace("{{CATALOG_PATH}}", KatalogYolu.Replace("\\", "\\\\"))  // TOML kacisi
+            .Replace("{{CATALOG_PATH}}", TomlKacis(KatalogYolu))
             .Replace("{{TOKEN_FIELD}}", _m.Codex.TokenField)
-            .Replace("{{TOKEN}}", anahtar);
+            .Replace("{{TOKEN}}", TomlKacis(anahtar));
+        var s = CodexAyar.SablonuAyir(dolu);
+        // Anahtar modunda web kitiyle birebir (canlida calisan "normal kurulum").
+        if (anahtarGiris) s.SaglayiciSatirlar.Add("requires_openai_auth = true");
+        return s;
+    }
 
+    public void CodexAyariYaz(string anahtar, Manifest.ModelInfo model, bool anahtarGiris)
+    {
         Directory.CreateDirectory(CodexDizini);
-        File.WriteAllText(ProfilYolu, icerik, new UTF8Encoding(false));
+
+        string? mevcut = null;
+        if (File.Exists(AyarYolu))
+        {
+            try { mevcut = File.ReadAllText(AyarYolu, new UTF8Encoding(false, true)); }
+            catch (DecoderFallbackException) { throw new KurulumHatasi("Codex ayarlanamadi: config.toml okunamadi (UTF-8 degil)."); }
+            if (!File.Exists(AyarAnlikYedekYolu)) try { File.Copy(AyarYolu, AyarAnlikYedekYolu); } catch { }
+        }
+
+        var (yeni, buSeferki) = CodexAyar.Uygula(mevcut, Sablon(anahtar, model, anahtarGiris));
+        var hata = CodexAyar.Dogrula(yeni);
+        if (hata is not null) throw new KurulumHatasi("Codex ayarlanamadi: " + hata);
+
+        // ILK kurulumun yedegi korunur.
+        var yedek = buSeferki;
+        if (File.Exists(YedekYolu))
+        {
+            try
+            {
+                var eski = JsonSerializer.Deserialize<CodexAyar.Yedek>(File.ReadAllText(YedekYolu));
+                if (eski is not null)
+                {
+                    eski.YonetilenAnahtarlar = eski.YonetilenAnahtarlar.Union(buSeferki.YonetilenAnahtarlar)
+                        .OrderBy(x => x, StringComparer.Ordinal).ToList();
+                    yedek = eski;
+                }
+            }
+            catch { }
+        }
+        AtomikYaz(YedekYolu, JsonSerializer.Serialize(yedek));
+        AtomikYaz(AyarYolu, yeni);
+
+        if (anahtarGiris)
+        {
+            if (!File.Exists(AuthYedekYolu) && !File.Exists(AuthYokIsareti))
+            {
+                if (File.Exists(AuthYolu)) File.Copy(AuthYolu, AuthYedekYolu);
+                else File.WriteAllText(AuthYokIsareti, "");
+            }
+            var icerik = new Dictionary<string, string> { ["auth_mode"] = "apikey", ["OPENAI_API_KEY"] = anahtar };
+            AtomikYaz(AuthYolu, JsonSerializer.Serialize(icerik, new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        }
+        else
+        {
+            AuthGeriKoy();   // mod degisti: ChatGPT girisi geri gelsin
+        }
+
+        if (File.Exists(EskiProfilYolu)) try { File.Delete(EskiProfilYolu); } catch { }
+        if (File.Exists(EskiKisayolYolu)) try { File.Delete(EskiKisayolYolu); } catch { }
     }
 
-    private void KisayolYaz()
+    private void AuthGeriKoy()
     {
-        // WScript.Shell COM: ek paket gerektirmez.
-        var tip = Type.GetTypeFromProgID("WScript.Shell");
-        if (tip is null) return;
-        dynamic? kabuk = Activator.CreateInstance(tip);
-        if (kabuk is null) return;
-        dynamic k = kabuk.CreateShortcut(KisayolYolu);
-        k.TargetPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        k.Arguments = $"/k codex -p {_m.Codex.ProfileName}";
-        k.Description = "Codex — YapayZekaLab uzerinden";
-        k.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        k.Save();
+        if (File.Exists(AuthYedekYolu))
+        {
+            File.Copy(AuthYedekYolu, AuthYolu, overwrite: true);
+            File.Delete(AuthYedekYolu);
+        }
+        else if (File.Exists(AuthYokIsareti))
+        {
+            if (File.Exists(AuthYolu)) File.Delete(AuthYolu);
+            File.Delete(AuthYokIsareti);
+        }
     }
 
-    /// Profilin gercekten yuklendigini ve BIZE gittigini kanitlar.
-    ///
-    /// IZOLE calisir: gecici bir CODEX_HOME'a yalniz bizim profil kopyalanir (katalog
-    /// yolu gercek dosyaya bakar). Sebep: `codex exec` calistigi dizin icin config.toml'a
-    /// `[projects.*] trust_level` YAZAR (0.153'te olculdu) — musterinin config.toml'una
-    /// dokunmama sozunu bozmamak ve musterinin MCP sunucularini bosuna baslatmamak icin.
-    private void Dogrula()
+    // ── Baglanti testi (Codex biciminde, CLI'siz) ──────────────────────────
+
+    /// Tek SSE satiri. Ilk TERMINAL olay kazanir: response.completed → tamam; response.failed/error → hata.
+    public static (string Durum, string Mesaj) AkisSatiri(string satir)
     {
-        var gecici = Path.Combine(Path.GetTempPath(), "yzlab-dogrula-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(gecici);
+        if (!satir.StartsWith("data:")) return ("devam", "");
         try
         {
-            File.Copy(ProfilYolu, Path.Combine(gecici, _m.Codex.ProfileFile), overwrite: true);
-            var r = Calistir("cmd.exe",
-                $"/d /s /c \"codex exec -p {_m.Codex.ProfileName} -m {DogrulamaModeli} -c model_reasoning_effort=low --skip-git-repo-check -C \"{gecici}\" ok\"",
-                120_000, new() { ["CODEX_HOME"] = gecici });
-            var c = r.Cikti;
-            // ⚠️ Duz "401" arama YANLIS POZITIF verir (token sayisi 8,401, sure 3401ms).
-            if (YetkiReddiMi(c))
-                throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis.");
-            if (c.Contains("failed to parse model_catalog_json"))
-                throw new KurulumHatasi("Model katalogu bozuk indi — tekrar dene.");
-            if (!c.Contains("yapayzekalab"))
-                throw new KurulumHatasi("Profil yuklenmedi:\n" + Kisalt(c));
-            // Izolasyon KANITI: codex exec trust kaydini calistigi CODEX_HOME'un config.toml'una
-            // yazar; gecici dizinde yoksa exec baska bir CODEX_HOME'da kostu demektir.
-            if (!File.Exists(Path.Combine(gecici, "config.toml")))
-                throw new KurulumHatasi("Dogrulama izole kosmadi (CODEX_HOME ezildi?).");
+            using var doc = JsonDocument.Parse(satir[5..].Trim());
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out var tipE)
+                || tipE.ValueKind != JsonValueKind.String) return ("devam", "");
+            var tip = tipE.GetString();
+            if (tip == "response.completed") return ("tamam", "");
+            if (tip == "response.failed" || tip == "error")
+            {
+                string mesaj = tip!;
+                if (root.TryGetProperty("response", out var r) && r.ValueKind == JsonValueKind.Object
+                    && r.TryGetProperty("error", out var e1) && e1.ValueKind == JsonValueKind.Object
+                    && e1.TryGetProperty("message", out var m1) && m1.ValueKind == JsonValueKind.String)
+                    mesaj = m1.GetString()!;
+                else if (root.TryGetProperty("error", out var e2) && e2.ValueKind == JsonValueKind.Object
+                    && e2.TryGetProperty("message", out var m2) && m2.ValueKind == JsonValueKind.String)
+                    mesaj = m2.GetString()!;
+                return ("hata", mesaj);
+            }
         }
-        finally
-        {
-            try { Directory.Delete(gecici, true); } catch { }
-        }
+        catch { }
+        return ("devam", "");
     }
 
-    // ── Claude Code (terminal + Claude masaustu uygulamasi) ───────────────
+    private async Task<(string Tur, string Mesaj)> TekIstekAsync(string anahtar, string model)
+    {
+        var govde = new Dictionary<string, object>
+        {
+            ["model"] = model,
+            ["instructions"] = "Kisa cevap ver.",
+            ["input"] = new object[]
+            {
+                new Dictionary<string, object>
+                {
+                    ["type"] = "message", ["role"] = "user",
+                    ["content"] = new object[] { new Dictionary<string, object> { ["type"] = "input_text", ["text"] = "Sadece ok yaz" } },
+                },
+            },
+            ["store"] = false,
+            ["stream"] = true,
+            ["reasoning"] = new Dictionary<string, object> { ["effort"] = "low" },
+        };
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+            using var req = new HttpRequestMessage(HttpMethod.Post, _m.Api.BaseUrl.TrimEnd('/') + "/responses");
+            req.Headers.TryAddWithoutValidation("Authorization", _m.Api.AuthPrefix + anahtar);
+            req.Headers.TryAddWithoutValidation("Accept", "text/event-stream");
+            req.Content = new StringContent(JsonSerializer.Serialize(govde), Encoding.UTF8, "application/json");
+            using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            var kod = (int)resp.StatusCode;
+            if (kod == 401) return ("yetkisiz", "");
+            if (kod == 402 || kod == 403) return ("hakYok", "HTTP " + kod);
+            if (kod != 200) return ("gecici", "HTTP " + kod);
+            using var st = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using var rd = new StreamReader(st, Encoding.UTF8);
+            var sayac = 0;
+            while (true)
+            {
+                var l = await rd.ReadLineAsync(cts.Token);
+                if (l is null) break;
+                if (++sayac > 20000) return ("gecici", "akis cok uzun");
+                var (d, m) = AkisSatiri(l);
+                if (d == "tamam") return ("basarili", "");
+                if (d == "hata") return ("gecici", m);
+            }
+            return ("gecici", "akis tamamlanmadi");
+        }
+        catch (Exception e) { return ("gecici", e.Message); }
+    }
+
+    /// Once hizli model (3 deneme); paket o modeli kapsamiyorsa secilen modelle (3 deneme).
+    public async Task BaglantiyiDogrulaAsync(string anahtar, string secilenModel)
+    {
+        var modeller = new List<string> { DogrulamaModeli };
+        if (secilenModel != DogrulamaModeli) modeller.Add(secilenModel);
+        var sonHata = "bilinmeyen";
+        var hakYok = false;
+        foreach (var model in modeller)
+        {
+            hakYok = false;
+            for (var deneme = 1; deneme <= 3; deneme++)
+            {
+                var (tur, m) = await TekIstekAsync(anahtar, model);
+                if (tur == "basarili") return;
+                if (tur == "yetkisiz") throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis. Panelden yeni anahtar olustur.");
+                sonHata = model + ": " + m;
+                if (tur == "hakYok") { hakYok = true; break; }
+                if (deneme < 3) await Task.Delay(1500);
+            }
+        }
+        throw new KurulumHatasi(hakYok
+            ? "Anahtar gecerli ama istek reddedildi (" + sonHata + "). Panelden paketini/bakiyeni kontrol et."
+            : "Baglanti test edilemedi: " + sonHata);
+    }
+
+    // ── Node / npm (yalniz Claude Code icin) ───────────────────────────────
+
+    private async Task NodeHazirlaAsync(Action<string> bildir)
+    {
+        if (KomutVar("npm")) return;
+        bildir("Node.js kuruluyor… (birkac dakika)");
+        await NodeKurAsync();
+    }
+
+    /// ⚠️ winget KULLANMIYORUZ: Windows Server'da hic yok. Dogrudan MSI.
+    private async Task NodeKurAsync()
+    {
+        var msi = Path.Combine(Path.GetTempPath(), "node-yzlab.msi");
+        using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+        {
+            var bytes = await http.GetByteArrayAsync(_m.Node.Windows.Url);
+            await File.WriteAllBytesAsync(msi, bytes);
+        }
+        var psi = new ProcessStartInfo("msiexec.exe", $"/i \"{msi}\" {_m.Node.Windows.SilentArgs}")
+        { UseShellExecute = true, Verb = "runas" };
+        using var p = Process.Start(psi) ?? throw new KurulumHatasi("Node kurulumu baslatilamadi.");
+        await p.WaitForExitAsync();
+        if (p.ExitCode != 0)
+            throw new KurulumHatasi("Node kurulumu reddedildi veya basarisiz (kod " + p.ExitCode + ").");
+        var makine = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? "";
+        var kullanici = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? "";
+        Environment.SetEnvironmentVariable("PATH", makine + ";" + kullanici);
+    }
+
+    /// npm'in global bin dizini yeni kurulan Node'da surecimizin PATH'inde olmayabilir → ekle.
+    private static void NpmGlobalBiniPathEkle()
+    {
+        var r = Calistir("cmd.exe", "/d /s /c \"npm prefix -g\"", 30_000);
+        var prefix = r.Cikti.Split('\n').Select(x => x.Trim()).LastOrDefault(x => x.Length > 0);
+        if (r.Kod != 0 || string.IsNullOrEmpty(prefix) || !Directory.Exists(prefix)) return;
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        if (!path.Split(';').Any(x => string.Equals(x.TrimEnd('\\'), prefix.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)))
+            Environment.SetEnvironmentVariable("PATH", prefix + ";" + path);
+    }
+
+    /// Codex/Claude ciktisinda GERCEK yetki reddi var mi? Sayilarin icindeki "401"e kanmaz.
+    public static bool YetkiReddiMi(string c)
+    {
+        if (c.Contains("Unauthorized") || c.Contains("authentication_error") || c.Contains("Invalid API key")
+            || c.Contains("invalid_api_key") || c.Contains("gecersiz") || c.Contains("geçersiz")) return true;
+        return Regex.IsMatch(c, @"(?i)(http|status|code)\D{0,4}401(\D|$)");
+    }
+
+    // ── Claude Code (istege bagli) ─────────────────────────────────────────
 
     private async Task ClaudeHazirlaAsync(Action<string> bildir)
     {
@@ -346,9 +532,7 @@ public sealed class Kurucu
             throw new KurulumHatasi("Claude Code kurulamadi: " + Kisalt(r.Cikti));
     }
 
-    /// settings.json'in YALNIZ `env` blogunu duzenler; diger her anahtar (permissions,
-    /// hooks, model…) aynen kalir. Ilk yazimdan once birebir yedek alinir (Geri Al bunu
-    /// geri koyar). Kalinti: env'de ANTHROPIC_API_KEY kalirsa AUTH_TOKEN'i EZER → silinir.
+    /// settings.json'in YALNIZ `env` blogu; diger anahtarlar kalir. Ilk yazimdan once birebir yedek.
     public void ClaudeAyarYaz(string anahtar, string modelId)
     {
         Directory.CreateDirectory(ClaudeDizini);
@@ -362,7 +546,6 @@ public sealed class Kurucu
                 try { obj = JsonNode.Parse(ham) as JsonObject ?? throw new Exception("nesne degil"); }
                 catch { throw new KurulumHatasi($"{ClaudeAyarYolu} gecerli JSON degil — elle duzelt, sonra tekrar dene."); }
             }
-            // Yedek YALNIZ ilk kurulumda alinir: yeniden kurmak yedegi ezmesin.
             if (!ClaudeKuruluMu) File.Copy(ClaudeAyarYolu, ClaudeYedekYolu, overwrite: false);
         }
         else
@@ -402,9 +585,7 @@ public sealed class Kurucu
         k.Save();
     }
 
-    /// settings.json'daki env ile Claude Code'un gercekten BIZE gittigini kanitlar.
-    /// IZOLE: gecici CLAUDE_CONFIG_DIR'a yalniz settings.json kopyalanir — musterinin
-    /// oturum/proje kayitlarina (.claude.json, projects/) dokunulmaz.
+    /// settings.json'daki env ile Claude Code'un BIZE gittigini kanitlar. IZOLE (gecici CLAUDE_CONFIG_DIR).
     private void ClaudeDogrula()
     {
         var gecici = Path.Combine(Path.GetTempPath(), "yzlab-claude-dogrula-" + Guid.NewGuid().ToString("N"));
@@ -423,7 +604,6 @@ public sealed class Kurucu
                 throw new KurulumHatasi("Anahtar gecersiz veya iptal edilmis.");
             if (!(c.Contains("\"stop_reason\"") || c.Contains("\"result\"")) || c.Contains("\"is_error\":true"))
                 throw new KurulumHatasi("Claude Code dogrulama yaniti beklenmedik:\n" + Kisalt(c));
-            // Izolasyon kaniti: claude, CLAUDE_CONFIG_DIR'a .claude.json / projects yazar.
             if (!File.Exists(Path.Combine(cfg, ".claude.json")) && !Directory.Exists(Path.Combine(cfg, "projects")))
                 throw new KurulumHatasi("Claude Code dogrulama izole kosmadi (CLAUDE_CONFIG_DIR ezildi?).");
         }
@@ -433,8 +613,36 @@ public sealed class Kurucu
         }
     }
 
-    /// Geri alma sirasinda yutulan hatalar (musteriye ve CLI'a gosterilir; sessiz kalmasin).
-    public List<string> GeriAlHatalari { get; } = new();
+    // ── Geri al ────────────────────────────────────────────────────────────
+
+    /// `kisayollar: false` → masaustu kisayollarina dokunulmaz (--selftest bunu kullanir).
+    public void GeriAl(bool kisayollar = true)
+    {
+        GeriAlHatalari.Clear();
+        if (File.Exists(YedekYolu))
+        {
+            try
+            {
+                var yedek = JsonSerializer.Deserialize<CodexAyar.Yedek>(File.ReadAllText(YedekYolu))
+                            ?? throw new Exception("yedek bozuk");
+                string? mevcut = File.Exists(AyarYolu) ? File.ReadAllText(AyarYolu) : null;
+                var eski = CodexAyar.GeriAl(mevcut, yedek);
+                if (eski is not null) AtomikYaz(AyarYolu, eski);
+                else if (File.Exists(AyarYolu)) File.Delete(AyarYolu);
+                File.Delete(YedekYolu);
+            }
+            catch (Exception e) { GeriAlHatalari.Add("config.toml: " + e.Message); }
+        }
+        try { AuthGeriKoy(); } catch (Exception e) { GeriAlHatalari.Add("auth.json: " + e.Message); }
+
+        var hedefler = new List<string> { KatalogYolu, EskiProfilYolu };
+        if (kisayollar) hedefler.Add(EskiKisayolYolu);
+        foreach (var y in hedefler)
+            try { if (File.Exists(y)) File.Delete(y); }
+            catch (Exception e) { GeriAlHatalari.Add(Path.GetFileName(y) + ": " + e.Message); }
+
+        ClaudeGeriAl(kisayollar);
+    }
 
     public void ClaudeGeriAl(bool kisayol = true)
     {
@@ -442,7 +650,6 @@ public sealed class Kurucu
         {
             if (File.Exists(ClaudeYedekYolu))
             {
-                // Yedegi ONCE yerine kopyala, sonra yedegi sil: arada hata olursa dosya kaybolmaz.
                 File.Copy(ClaudeYedekYolu, ClaudeAyarYolu, overwrite: true);
                 File.Delete(ClaudeYedekYolu);
             }
@@ -458,19 +665,6 @@ public sealed class Kurucu
         catch (Exception e) { GeriAlHatalari.Add("claude kisayol: " + e.Message); }
     }
 
-    /// `kisayollar: false` → yalniz CODEX_HOME/CLAUDE_CONFIG_DIR icindekiler; masaustu
-    /// kisayollari (profil dizinine bagli, izole edilemez) dokunulmaz. --selftest bunu kullanir.
-    public void GeriAl(bool kisayollar = true)
-    {
-        GeriAlHatalari.Clear();
-        var hedefler = new List<string> { ProfilYolu, KatalogYolu };
-        if (kisayollar) hedefler.Add(KisayolYolu);
-        foreach (var y in hedefler)
-            try { if (File.Exists(y)) File.Delete(y); }
-            catch (Exception e) { GeriAlHatalari.Add(Path.GetFileName(y) + ": " + e.Message); }
-        ClaudeGeriAl(kisayollar);
-    }
-
     // ── yardimcilar ────────────────────────────────────────────────────────
 
     public readonly record struct Sonuc(int Kod, string Cikti);
@@ -483,8 +677,7 @@ public sealed class Kurucu
             WorkingDirectory = calismaDizini ?? "",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            // ⚠️ stdin KAPALI olmali: `codex exec` stdin bir boru/terminal ise
-            // "Reading additional input from stdin..." deyip EOF bekler ve ASILI KALIR.
+            // ⚠️ stdin KAPALI olmali: claude -p / codex exec boru stdin'de ASILI KALIR.
             RedirectStandardInput = true,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -507,13 +700,12 @@ public sealed class Kurucu
             try { p.Kill(true); } catch { }
             lock (sb) return new Sonuc(124, sb + "\n(zaman asimi)");
         }
-        p.WaitForExit(); // async okuma tamponlari bosalsin
+        p.WaitForExit();
         lock (sb) return new Sonuc(p.ExitCode, sb.ToString().Trim());
     }
 
     public static bool KomutVar(string komut) =>
         Calistir("cmd.exe", $"/d /s /c \"where {komut}\"", 15_000).Kod == 0;
 
-    private static string Kisalt(string s) =>
-        s.Length <= 300 ? s : s[^300..];
+    private static string Kisalt(string s) => s.Length <= 300 ? s : s[^300..];
 }

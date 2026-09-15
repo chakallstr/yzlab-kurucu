@@ -15,8 +15,7 @@ on:
 jobs:
   derle-ve-sina:
     runs-on: windows-latest
-    # Release'e dosya eklemek icin GITHUB_TOKEN'a yazma izni sart (v0.1.1'de
-    # "Resource not accessible by integration" ile kaldi, exe elle yuklendi).
+    # Release'e dosya eklemek icin GITHUB_TOKEN'a yazma izni sart (v0.1.1'de 403).
     permissions:
       contents: write
     steps:
@@ -30,10 +29,7 @@ jobs:
         run: dotnet publish windows/src/YzlabKurucu.csproj -c Release -o out
 
       - name: Kendi kendini sina
-        # Windows makinemiz yok; kurulum mantiginin ILK dogrulamasi bu.
-        # ⚠️ WinExe (GUI alt sistemi) oldugu icin PowerShell onu BEKLEMEZ ve
-        # cikis kodunu okumaz -> test kalsa bile is yesil gorunur.
-        # Start-Process -Wait -PassThru ile beklet ve kodu ELLE kontrol et.
+        # ⚠️ WinExe: PowerShell beklemez ve cikis kodunu okumaz → Start-Process -Wait -PassThru.
         shell: pwsh
         run: |
           $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--selftest' `
@@ -58,11 +54,9 @@ jobs:
         with:
           files: out/YzlabKurucu.exe
 
-  # GERCEK ANAHTARLA UCTAN UCA: runner'da codex YOK -> kurucu npm ile kurar,
-  # katalogu canli API'den ceker, profili yazar, kisayolu koyar, codex exec ile
-  # dogrular. Sonra bagimsiz kanit + geri alma. Musteri dosyalarina dokunmama
-  # invaryanti burada da gercek dosyalarla olculur.
-  # Anahtar: repo secret YZLAB_TEST_KEY (fork PR'larina verilmez -> orada atlanir).
+  # GERCEK ANAHTARLA UCTAN UCA (v0.2 masaustu yolu): kurucu config.toml'a isaretli blok yazar,
+  # auth.json'a (ChatGPT girisi) DOKUNMAZ; PROFILSIZ codex exec bize gitmeli (masaustu ayni dosyayi okur).
+  # Sonra anahtar modu (auth.json apikey, yedekli) ve geri al. Anahtar: repo secret YZLAB_TEST_KEY.
   uctan-uca:
     name: Gercek anahtarla uctan uca
     needs: derle-ve-sina
@@ -75,117 +69,107 @@ jobs:
           name: YzlabKurucu-exe
           path: out
 
-      - name: Kur (codex yok → npm ile kurar) → dogrula → geri al
+      - name: Kur (masaustu yolu) → profilsiz kanit → anahtar modu → geri al
         shell: pwsh
         env:
           YZLAB_ANAHTAR: ${{ secrets.YZLAB_TEST_KEY }}
         run: |
-          if (-not $env:YZLAB_ANAHTAR) { Write-Host "::warning::YZLAB_TEST_KEY tanimli degil, uctan uca test ATLANDI"; exit 0 }
+          if (-not $env:YZLAB_ANAHTAR) { Write-Host "::warning::YZLAB_TEST_KEY tanimli degil, ATLANDI"; exit 0 }
+          function Norm($s) { if ($null -eq $s) { return "" }; return ($s -replace "`r`n", "`n").Trim() }
+          function ProjelerSiz($s) { return (Norm ((($s -replace "`r`n", "`n") + "`n") -replace '(?m)^\[projects\.[^\n]*\n(?:(?!\[)[^\n]*\n)*', '')) }
+
           $h = Join-Path $env:RUNNER_TEMP "codex-home"
           New-Item -ItemType Directory -Force $h | Out-Null
-          Set-Content -Path "$h\config.toml" -Value 'model = "kendi-modelim"' -NoNewline
-          Set-Content -Path "$h\auth.json"   -Value '{"auth_mode":"chatgpt"}' -NoNewline
-          $cfg0  = Get-Content "$h\config.toml" -Raw
-          $auth0 = Get-Content "$h\auth.json" -Raw
+          $cfg0  = "model = `"kendi-modelim`"`n`n[mcp_servers.foo]`ncommand = `"bar`"`n"
+          $auth0 = '{"auth_mode":"chatgpt"}'
+          [IO.File]::WriteAllText("$h\config.toml", $cfg0)
+          [IO.File]::WriteAllText("$h\auth.json", $auth0)
           $env:CODEX_HOME = $h
-          # Claude Code: izole CLAUDE_CONFIG_DIR, icinde musterinin "eski" settings.json'u
           $c = Join-Path $env:RUNNER_TEMP "claude-home"
           New-Item -ItemType Directory -Force $c | Out-Null
           $settings0 = "{`n  `"permissions`": {`"allow`": [`"Bash`"]},`n  `"env`": {`"ANTHROPIC_API_KEY`": `"sk-eski`"},`n  `"theme`": `"dark`"`n}`n"
-          Set-Content -Path "$c\settings.json" -Value $settings0 -NoNewline
+          [IO.File]::WriteAllText("$c\settings.json", $settings0)
           $env:CLAUDE_CONFIG_DIR = $c
 
-          $var = Get-Command codex -ErrorAction SilentlyContinue
-          $varc = Get-Command claude -ErrorAction SilentlyContinue
-          Write-Host "kurulum oncesi codex var mi: $([bool]$var)  claude var mi: $([bool]$varc)  (beklenen: False -> kurucu kuracak)"
+          Write-Host "kurulum oncesi codex var mi: $([bool](Get-Command codex -ErrorAction SilentlyContinue))  claude var mi: $([bool](Get-Command claude -ErrorAction SilentlyContinue))"
 
-          $p = Start-Process -FilePath ./out/YzlabKurucu.exe `
-                 -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','1','--claude','1' `
-                 -NoNewWindow -Wait -PassThru
-          Write-Host "kur cikis kodu: $($p.ExitCode)"
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--kur','--model','gpt-5.6-luna','--claude','1' -NoNewWindow -Wait -PassThru
+          Write-Host "kur cikis kodu: $($p.ExitCode)  sure: $([int]$sw.Elapsed.TotalSeconds) sn"
           if ($p.ExitCode -ne 0) { throw "kurulum BASARISIZ" }
 
-          # --- invaryantlar ---
-          if (-not (Test-Path "$h\yzlab.config.toml"))        { throw "profil yok" }
-          if (-not (Test-Path "$h\yzlab-model-catalog.json")) { throw "katalog yok" }
-          if ((Get-Content "$h\config.toml" -Raw) -ne $cfg0)  { throw "config.toml DEGISTI" }
-          if ((Get-Content "$h\auth.json" -Raw) -ne $auth0)   { throw "auth.json DEGISTI" }
-          $prof = Get-Content "$h\yzlab.config.toml" -Raw
-          if ($prof -match '\{\{')              { throw "sablonda yer tutucu kaldi" }
-          if ($prof -notmatch 'gpt-5\.6-luna')  { throw "model yazilmadi" }
-          if ($prof -notmatch 'yapayzekalab\.org/v1') { throw "base_url yazilmadi" }
+          # --- Codex (masaustu yolu) invaryantlari ---
+          $cfg1 = [IO.File]::ReadAllText("$h\config.toml")
+          if ($cfg1 -notmatch '# >>> YapayZekaLab kurucu: ust ayarlar') { throw "isaretli blok yok" }
+          if ($cfg1 -notmatch 'model_provider = "yapayzekalab"')         { throw "model_provider yazilmadi" }
+          if ($cfg1 -notmatch '\[model_providers\.yapayzekalab\]')       { throw "saglayici tablosu yok" }
+          if ($cfg1 -notmatch '\[mcp_servers\.foo\]')                    { throw "musterinin tablosu kayboldu" }
+          if ($cfg1 -match 'kendi-modelim')                               { throw "eski model satiri kalmis (cift anahtar)" }
+          if ($cfg1 -match 'requires_openai_auth')                        { throw "hesap modunda requires_openai_auth olmamali" }
+          if ([IO.File]::ReadAllText("$h\auth.json") -ne $auth0)          { throw "auth.json DEGISTI (hesap modu)" }
+          if (-not (Test-Path "$h\yzlab-kurucu-yedek.json"))             { throw "yedek json yok" }
+          if (Test-Path "$h\yzlab.config.toml")                           { throw "profil dosyasi yazilmis" }
           $kat = Get-Content "$h\yzlab-model-catalog.json" -Raw | ConvertFrom-Json
           Write-Host "katalog model sayisi: $($kat.models.Count)"
           if ($kat.models.Count -lt 1) { throw "katalog bos" }
-          $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex (YapayZekaLab).lnk'
-          if (-not (Test-Path $lnk)) { throw "kisayol yok: $lnk" }
-          Write-Host "kisayol: $lnk ($((Get-Item $lnk).Length) bayt)"
 
           # --- Claude Code invaryantlari ---
-          if (-not (Test-Path "$c\settings.json.bak-yzlab")) { throw "claude yedek yok" }
-          if ((Get-Content "$c\settings.json.bak-yzlab" -Raw) -ne $settings0) { throw "claude yedek birebir degil" }
+          if ([IO.File]::ReadAllText("$c\settings.json.bak-yzlab") -ne $settings0) { throw "claude yedek birebir degil" }
           $sj = Get-Content "$c\settings.json" -Raw | ConvertFrom-Json
           if ($sj.theme -ne 'dark' -or -not $sj.permissions) { throw "claude diger anahtarlar kayboldu" }
           if ($sj.env.PSObject.Properties.Name -contains 'ANTHROPIC_API_KEY') { throw "kalinti ANTHROPIC_API_KEY silinmedi" }
-          if ($sj.env.ANTHROPIC_BASE_URL -ne 'https://yapayzekalab.org') { throw "claude BASE_URL yanlis: $($sj.env.ANTHROPIC_BASE_URL)" }
-          if ($sj.env.ANTHROPIC_MODEL -ne 'gpt-5.6-luna') { throw "claude MODEL yanlis" }
+          if ($sj.env.ANTHROPIC_BASE_URL -ne 'https://yapayzekalab.org') { throw "claude BASE_URL yanlis" }
           if ($sj.env.ANTHROPIC_AUTH_TOKEN -ne $env:YZLAB_ANAHTAR) { throw "claude AUTH_TOKEN yanlis" }
           $lnk2 = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Claude Code (YapayZekaLab).lnk'
-          if (-not (Test-Path $lnk2)) { throw "claude kisayol yok: $lnk2" }
-          Write-Host "claude settings.json env OK, kisayol: $lnk2"
+          if (-not (Test-Path $lnk2)) { throw "claude kisayol yok" }
+          Write-Host "claude settings.json env OK"
 
-          # --- bagimsiz kanit: gercek CODEX_HOME ile codex bize gidiyor mu? ---
-          $out = & cmd /d /s /c "codex exec -p yzlab --skip-git-repo-check -C `"$env:RUNNER_TEMP`" `"Sadece ok yaz`" < NUL 2>&1" | Out-String
+          # --- bagimsiz kanit: PROFILSIZ codex exec (masaustunun okudugu ana config) ---
+          npm install -g @openai/codex 2>&1 | Select-Object -Last 1 | Out-String | Write-Host
+          $out = & cmd /d /s /c "codex exec --skip-git-repo-check -C `"$env:RUNNER_TEMP`" `"Sadece ok yaz`" < NUL 2>&1" | Out-String
           Write-Host ($out -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY')
-          if ($out -notmatch 'provider: yapayzekalab')     { throw "codex exec profili yuklemedi" }
-          if ($out -notmatch 'sandbox: danger-full-access') { throw "hazir ayarlar (sandbox_mode) yuklenmedi" }
-          # ⚠️ Bu BAGIMSIZ codex exec gercek CODEX_HOME'da kosar; profil danger-full-access oldugu icin
-          # Codex'in KENDISI config.toml'a `[projects."<dizin>"] trust_level` ekler (kurucu degil —
-          # kurucunun dogrulamasi izole dizinde). Kabul edilen tek fark bu blok; baska fark = kurucu dokundu.
-          $cfg1 = Get-Content "$h\config.toml" -Raw
-          $cfgNoProj = ($cfg1 -replace '(?s)\r?\n\s*\[projects\..*$', '')
-          if ($cfgNoProj.TrimEnd() -ne $cfg0.TrimEnd()) {
-            Write-Host "--- config.toml simdi:"; Write-Host $cfg1
-            throw "config.toml'a [projects] trust satiri DISINDA dokunuldu"
-          }
-          Write-Host "config.toml: yalniz Codex'in kendi [projects] trust satiri eklendi (beklenen)"
+          if ($out -notmatch 'provider: yapayzekalab') { throw "codex (profilsiz) bize gitmedi" }
+          $cfgExec = [IO.File]::ReadAllText("$h\config.toml")
+          if ((ProjelerSiz $cfgExec) -ne (ProjelerSiz $cfg1)) { Write-Host $cfgExec; throw "config.toml'a [projects] disinda dokunuldu" }
+          Write-Host "codex (profilsiz, ana config): provider yapayzekalab ✓"
 
-          # --- bagimsiz kanit: gercek CLAUDE_CONFIG_DIR ile claude bize gidiyor mu? (OAuth yok) ---
+          # --- bagimsiz kanit: claude (OAuth yok, kabukta sahte API_KEY) ---
           Push-Location $env:RUNNER_TEMP
-          $env:ANTHROPIC_API_KEY = 'sk-ant-SAHTE'   # kabuk kalintisi settings.json'i ezmemeli
+          $env:ANTHROPIC_API_KEY = 'sk-ant-SAHTE'
           $outc = & cmd /d /s /c "claude -p `"Sadece ok yaz`" --output-format json < NUL 2>&1" | Out-String
           Remove-Item Env:\ANTHROPIC_API_KEY
           Pop-Location
-          $masked = $outc -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY'
-          Write-Host ($masked.Substring(0, [Math]::Min(700, $masked.Length)))
-          if ($outc -notmatch '"stop_reason"' -or $outc -match '"is_error":true') { throw "claude -p beklenmedik yanit" }
-          if ($outc -notmatch 'gpt-5\.6-luna') { throw "claude bizim modeli kullanmadi" }
+          if ($outc -notmatch '"stop_reason"' -or $outc -match '"is_error":true') { Write-Host $outc; throw "claude -p beklenmedik yanit" }
+          Write-Host "claude -p bize gitti ✓"
+
+          # --- anahtarla giris modu ---
+          $p3 = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--kur','--model','gpt-5.6-luna','--anahtar-giris','1' -NoNewWindow -Wait -PassThru
+          if ($p3.ExitCode -ne 0) { throw "anahtar modu kurulum BASARISIZ" }
+          $aj = Get-Content "$h\auth.json" -Raw | ConvertFrom-Json
+          if ($aj.auth_mode -ne 'apikey' -or $aj.OPENAI_API_KEY -ne $env:YZLAB_ANAHTAR) { throw "anahtar modu: auth.json apikey degil" }
+          if ([IO.File]::ReadAllText("$h\auth.json.bak-yzlab") -ne $auth0) { throw "anahtar modu: auth yedegi birebir degil" }
+          if ([IO.File]::ReadAllText("$h\config.toml") -notmatch 'requires_openai_auth = true') { throw "anahtar modu: requires_openai_auth yok" }
+          $out3 = & cmd /d /s /c "codex exec --skip-git-repo-check -C `"$env:RUNNER_TEMP`" `"Sadece ok yaz`" < NUL 2>&1" | Out-String
+          if ($out3 -notmatch 'provider: yapayzekalab') { Write-Host ($out3 -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY'); throw "anahtar modunda codex bize gitmedi" }
+          Write-Host "anahtar modu ✓"
 
           # --- geri al ---
           $p2 = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--geri-al' -NoNewWindow -Wait -PassThru
           Write-Host "geri al cikis kodu: $($p2.ExitCode)"
-          if ($p2.ExitCode -ne 0)                  { throw "geri al basarisiz" }
-          if (Test-Path "$h\yzlab.config.toml")    { throw "geri al profili silmedi" }
-          if (Test-Path $lnk)                      { throw "geri al kisayolu silmedi" }
-          if (-not (Test-Path "$h\config.toml"))   { throw "geri al config.toml'u SILDI!" }
-          if ((Get-Content "$h\config.toml" -Raw) -ne $cfg1) { throw "geri al config.toml'a dokundu" }
-          $geri = Get-Content "$c\settings.json" -Raw -ErrorAction SilentlyContinue
-          if ($geri -ne $settings0) {
-            Write-Host "--- claude dizini:"; Get-ChildItem -Force $c | Format-Table Name,Length | Out-String | Write-Host
-            Write-Host "--- settings.json simdi:"; Write-Host ($geri -replace [regex]::Escape($env:YZLAB_ANAHTAR), 'KEY')
-            Write-Host "--- beklenen:"; Write-Host $settings0
-            throw "geri al claude settings.json'u birebir geri koymadi"
-          }
-          if (Test-Path "$c\settings.json.bak-yzlab") { throw "geri al claude yedegini kaldirmadi" }
-          if (Test-Path $lnk2) { throw "geri al claude kisayolunu silmedi" }
-          Write-Host "✓ uctan uca TAM (Codex + Claude Code): kur + dogrula + bagimsiz kanit + geri al"
+          if ($p2.ExitCode -ne 0) { throw "geri al basarisiz" }
+          if ([IO.File]::ReadAllText("$h\auth.json") -ne $auth0) { throw "geri al: auth.json geri gelmedi" }
+          $cfgSon = [IO.File]::ReadAllText("$h\config.toml")
+          if ((ProjelerSiz $cfgSon) -ne (Norm $cfg0)) { Write-Host $cfgSon; throw "geri al: config.toml onceki hali degil" }
+          if (Test-Path "$h\yzlab-kurucu-yedek.json") { throw "geri al: yedek json kaldi" }
+          if (Test-Path "$h\yzlab-model-catalog.json") { throw "geri al: katalog kaldi" }
+          if ([IO.File]::ReadAllText("$c\settings.json") -ne $settings0) { throw "geri al: claude settings.json birebir degil" }
+          if (Test-Path "$c\settings.json.bak-yzlab") { throw "geri al: claude yedegi kaldi" }
+          if (Test-Path $lnk2) { throw "geri al: claude kisayolu kaldi" }
+          Write-Host "✓ uctan uca TAM (masaustu yolu + anahtar modu + Claude Code): kur + kanit + geri al"
 
-  # NODE YOKKEN yol: runner'in Node'u kaldirilir, PATH'ten silinir; kurucu MSI'yi
-  # nodejs.org'dan indirip sessiz kurar. Runner ortami musteri PC'sinden farkli
-  # (UAC yok, onceden kurulu Node) -> bu is BILGI amacli, kirmizi olursa release'i
-  # durdurmaz (continue-on-error). Sonucu her calismada oku.
+  # NODE YOKKEN yol (yalniz Claude Code Node ister; Codex yolu Node'suz): bilgi amacli.
   node-yokken:
-    name: Node yokken (MSI yolu, bilgi)
+    name: Node yokken (Claude MSI yolu, bilgi)
     needs: derle-ve-sina
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
@@ -203,21 +187,14 @@ jobs:
           YZLAB_ANAHTAR: ${{ secrets.YZLAB_TEST_KEY }}
         run: |
           if (-not $env:YZLAB_ANAHTAR) { Write-Host "::warning::YZLAB_TEST_KEY yok, atlandi"; exit 0 }
-          # 1) Runner'in Node'unu kaldir (MSI ise) — yoksa sadece PATH'ten gizle
           $urun = Get-CimInstance Win32_Product -Filter "Name like 'Node.js%'" -ErrorAction SilentlyContinue
           if ($urun) { Write-Host "kaldiriliyor: $($urun.Name) $($urun.Version)"; $null = $urun | Invoke-CimMethod -MethodName Uninstall }
-          else { Write-Host "MSI Node bulunamadi (hostedtoolcache olabilir); yalniz PATH'ten gizleniyor" }
           $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notmatch 'node|npm' }) -join ';'
           [Environment]::SetEnvironmentVariable('PATH', (([Environment]::GetEnvironmentVariable('PATH','Machine') -split ';') | Where-Object { $_ -notmatch 'node|npm' }) -join ';', 'Machine')
-          $n = Get-Command node -ErrorAction SilentlyContinue; $c = Get-Command codex -ErrorAction SilentlyContinue
-          Write-Host "node var mi: $([bool]$n)  codex var mi: $([bool]$c)  (ikisi de False olmali)"
-
-          $h = Join-Path $env:RUNNER_TEMP "codex-home2"; New-Item -ItemType Directory -Force $h | Out-Null
-          $env:CODEX_HOME = $h
-          $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--kur','--model','gpt-5.6-luna','--kisayol','0','--claude','0' -NoNewWindow -Wait -PassThru
+          Write-Host "node var mi: $([bool](Get-Command node -ErrorAction SilentlyContinue))"
+          $env:CODEX_HOME = Join-Path $env:RUNNER_TEMP "codex-home2"; New-Item -ItemType Directory -Force $env:CODEX_HOME | Out-Null
+          $env:CLAUDE_CONFIG_DIR = Join-Path $env:RUNNER_TEMP "claude-home2"; New-Item -ItemType Directory -Force $env:CLAUDE_CONFIG_DIR | Out-Null
+          $p = Start-Process -FilePath ./out/YzlabKurucu.exe -ArgumentList '--kur','--model','gpt-5.6-luna','--claude','1' -NoNewWindow -Wait -PassThru
           Write-Host "kur cikis kodu: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { throw "Node-yokken kurulum BASARISIZ" }
-          if (-not (Test-Path "$h\yzlab.config.toml")) { throw "profil yok" }
-          $env:PATH = [Environment]::GetEnvironmentVariable('PATH','Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH','User')
-          Write-Host "kurulan node: $(& node --version)  codex: $(& cmd /c 'codex --version')"
-          Write-Host "✓ Node yokken yol TAM (MSI + npm + profil + dogrulama)"
+          Write-Host "✓ Node yokken yol TAM (MSI + npm claude + dogrulama)"
