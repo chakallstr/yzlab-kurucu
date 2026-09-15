@@ -38,6 +38,13 @@ TARİHÇESİDİR; masaüstü o profili okumadığı için bırakıldı.
   `--selftest` (mac 76). Katalog `client_version` = npm `@openai/codex` latest (yoksa manifest min).
 - **Kanıt:** mac E2E v2 (scratchpad `e2e-mac-v2.sh`): hesap modu → PROFİLSİZ `codex exec` `provider: yapayzekalab`;
   anahtar modu → aynı; geri al → auth.json birebir, config.toml önceki hâli. Win CI `uctan-uca` aynısını yapar.
+- **Sonuçlar:** mac selftest 80/80 · mac gerçek pencere (anahtar panodan, Kur → 3 sn, Geri Al birebir) · win CI selftest
+  81/81 · win uçtan uca temiz runner'da (codex + claude yokken, Claude dahil) 33 sn.
+- ⚠️ **Codex 0.154 config.toml'u yeniden yazarken YORUM ve BOŞ satırları siliyor** (Windows CI'da ölçüldü) → işaret
+  yorumları kaybolur. Geri al / yeniden kur işarete değil anahtar + tablo adına dayandığı için çalışır (4 simülasyon testi);
+  CI karşılaştırmaları anlamsal (yorum/boş satır/`[projects.*]` hariç, sıralı satırlar).
+- **Yayın:** `v0.2.0` (latest, 2026-09-15). dmg noterli (universal); exe'yi release olayında CI kendisi ekledi
+  (`permissions: contents: write`). `releases/latest/download/YzlabKurucu.{dmg,exe}` ikisi de 200.
 
 ## Claude Code (2026-09-15 eklendi) — terminal + Claude masaüstü uygulaması
 - **Gateway `/v1/messages` GPT modellerini çeviriyor** (Anthropic sözleşmesi → Codex): canlı 200, araç
