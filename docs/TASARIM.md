@@ -1,7 +1,43 @@
 # yzlab Codex + Claude Code Kurucu — Tasarım
 
-Durum: **2026-09-15 · Codex + Claude Code uçtan uca TAM (mac gerçek makine + GUI, win CI gerçek anahtar). v0.1.2: arayüz donması + yavaş doğrulama düzeltildi.**
-Yayın: GitHub Release `v0.1.0`. İlk tasarım 2026-09-07; o günkü açık işler "Kapanış" bölümünde.
+Durum: **2026-09-15 · v0.2.0 — HEDEF CODEX MASAÜSTÜ.** Aşağıdaki "profil (`-p yzlab`)" anlatımları v0.1.x
+TARİHÇESİDİR; masaüstü o profili okumadığı için bırakıldı.
+
+## v0.2.0 — neden ve ne değişti (müşteri kamer5561, 2026-09-15)
+- **Olay:** müşteri kurucuyu çalıştırdı, "Kuruldu" gördü; Codex masaüstünde yazınca "hakkınız yok". Paketi sağlamdı
+  (30 haktan 2,5). Kurucunun doğrulama isteği 11:04'te bize geldi, **sonra masaüstünden tek istek gelmedi** →
+  masaüstü kendi ChatGPT hesabıyla OpenAI'ye gitti.
+- **Kök:** v0.1.x yalnız `$CODEX_HOME/yzlab.config.toml` profilini yazıyordu; bu yalnız `codex -p yzlab` ile okunur.
+  **Codex masaüstü (`ChatGPT.app`, bundle `com.openai.codex`, içinde codex-cli 0.154.0-alpha) profili OKUMAZ.**
+  Sahibin çalışan masaüstü kurulumu ana `config.toml`'da top-level `model_provider = "yapayzekalab"` +
+  `[model_providers.yapayzekalab]` (`experimental_bearer_token`), auth.json'da ChatGPT girişi → bu kanıtlı model.
+- **Yeni yazıcı `CodexAyar` (mac+win, saf, 20 test):** ana config.toml'a İŞARETLİ iki blok —
+  `# >>> YapayZekaLab kurucu: ust ayarlar` (dosyanın en başı; manifest şablonunun üst anahtarları) ve
+  `# >>> YapayZekaLab kurucu: saglayici` (sonda). Kurulumdan önce aynı üst anahtarlar ve eski
+  `[model_providers.yapayzekalab*]` tabloları ayıklanıp `yzlab-kurucu-yedek.json`'a konur (tekrar eden anahtar/tablo
+  Codex'i AÇILMAZ yapar; `dogrula` yazmadan önce kontrol eder). `[tools]` gibi diğer şablon tabloları ALINMAZ
+  (müşterinin tablosuyla çakışır). Geri Al: işaretli blokları + yönetilen anahtarları kaldırır, yedektekileri geri
+  koyar; kurulumdan SONRA Codex'in eklediği `[projects.*]` korunur. İlk kurulumda `config.toml.bak-yzlab` tam kopya.
+- **Giriş modları:** varsayılan **ChatGPT girişi durur** (auth.json'a dokunulmaz). Masaüstü uygulamasında hesap
+  limitine bağlı "You've hit your usage limit" afişleri var (app.asar: `rateLimitStatus`, `usage_limit_reached`);
+  müşterinin ChatGPT hesabında hak yoksa gönderimi engelleyebilir → **"ChatGPT hesabım yerine yalnız anahtarla gir"**
+  seçeneği: auth.json → `{"auth_mode":"apikey","OPENAI_API_KEY":…}` (+ sağlayıcıya `requires_openai_auth = true`,
+  web kitiyle birebir), önce `auth.json.bak-yzlab`. Hesap moduna dönünce/Geri Al'da auth.json birebir geri gelir.
+- **Hız / donma:** Node, Codex CLI ve (varsayılan) Claude Code artık KURULMAZ — masaüstü kendi codex'ini taşır.
+  Doğrulama doğrudan HTTPS `POST /v1/responses`, **Codex biçiminde** (`store:false`, `stream:true`, liste `input`,
+  `instructions`) — bazı bacaklar string input'u ("Input must be a list") ve store'suz isteği ("Store must be set to
+  false") REDDEDİYOR (ölçüldü). İlk terminal SSE olayı kazanır (gateway bazen completed'dan sonra bir failed daha
+  yolluyor — ölçüldü). Önce luna 3 deneme; 402/403 ise seçilen modelle 3 deneme. **Mac E2E: kurulum 3 sn.**
+  mac: dizin sondası artık `zsh -l` değil (her ekran çiziminde çalışıyordu) — env → `launchctl getenv` → ~/.codex;
+  env'de CODEX_HOME varsa YALNIZ o (testler sahibin launchctl dizinine yazmasın).
+- **Codex açıkken:** kurmadan önce sorulur (mac NSAlert / win MessageBox) → kapatılır, kurulumdan sonra yeniden
+  açılır (açıkken yazılan ayarı uygulama çıkışta ezebilir; ayar yalnız açılışta okunur). Win: pencereli süreçler
+  (`Codex`, `ChatGPT`), CloseMainWindow → 10 sn → aynı exe yolundaki süreçler Kill (tepsiye küçülme). CLI:
+  `--codex-kapat 1` yoksa hata. DEBUG: `YZLAB_CODEX_KONTROL=kapali`.
+- **CLI:** `--kur --anahtar K [--model] [--claude 0|1] [--anahtar-giris 0|1] [--codex-kapat 0|1]`, `--geri-al`,
+  `--selftest` (mac 76). Katalog `client_version` = npm `@openai/codex` latest (yoksa manifest min).
+- **Kanıt:** mac E2E v2 (scratchpad `e2e-mac-v2.sh`): hesap modu → PROFİLSİZ `codex exec` `provider: yapayzekalab`;
+  anahtar modu → aynı; geri al → auth.json birebir, config.toml önceki hâli. Win CI `uctan-uca` aynısını yapar.
 
 ## Claude Code (2026-09-15 eklendi) — terminal + Claude masaüstü uygulaması
 - **Gateway `/v1/messages` GPT modellerini çeviriyor** (Anthropic sözleşmesi → Codex): canlı 200, araç
